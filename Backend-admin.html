@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AliBaba Admin Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <!-- Header -->
+    <div class="header">
+        <div class="logo">AliBaba</div>
+        <div class="header-actions">
+            <button class="publish-btn" onclick="publishChanges()">Publish</button>
+            <div class="user-avatar"></div>
+        </div>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-title">Menu</div>
+                <div class="sidebar-tabs">
+                    <button class="tab-item active" aria-current="page">Products</button>
+                    <button class="tab-item">Revenue</button>
+                    <button class="tab-item">Rewards</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="table-container">
+                <div class="table-header">
+                    <h2>Product Management</h2>
+                    <div class="header-actions">
+                        <input type="file" id="csv-input" accept=".csv" hidden onchange="onCsvSelected(event)">
+                        <button class="add-product-btn import-csv-btn" onclick="triggerCsvPick()">Import CSV</button>
+                        <button class="add-product-btn" onclick="openAddProductModal()">Add Product</button>
+                    </div>
+                </div>
+                
+                <!-- Search Bar -->
+                <div class="search-bar">
+                    <div class="search-input-wrap">
+                        <span class="search-icon">🔎</span>
+                        <input id="product-search" type="text" class="search-input" placeholder="Search by name or barcode..." oninput="onSearchInput(event)">
+                        <button type="button" class="search-clear" onclick="clearSearch()" aria-label="Clear search">✕</button>
+                    </div>
+                </div>
+                
+                <div id="loading" class="loading" style="display: none;">Loading products...</div>
+                <div id="error-message"></div>
+                
+                <table id="products-table">
+                    <thead>
+                        <tr>
+                            <th>Image</th>
+                            <th>Name</th>
+                            <th>Description</th>
+                            <th>Availability</th>
+                            <th>Barcode</th>
+                            <th>Category</th>
+                            <th>Price</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="products-tbody">
+                        <!-- Products will be loaded here -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Product Modal -->
+    <div id="product-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modal-title">Add Product</h3>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            
+            <div id="modal-error"></div>
+            
+            <form id="product-form">
+                <div class="form-group">
+                    <label class="form-label">Name</label>
+                    <input type="text" class="form-input" id="product-name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Description</label>
+                    <input type="text" class="form-input" id="product-description" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Category</label>
+                    <select class="form-select" id="product-category" required>
+                        <option value="">Select Category</option>
+                        <option value="Fruit">Fruit</option>
+                        <option value="Vegetable">Vegetable</option>
+                        <option value="Electronics">Electronics</option>
+                        <option value="Clothing">Clothing</option>
+                        <option value="Books">Books</option>
+                        <option value="Dairy">Dairy</option>
+                        <option value="Meat">Meat</option>
+                        <option value="Bakery">Bakery</option>
+                        <option value="Beverages">Beverages</option>
+                        <option value="Frozen">Frozen</option>
+                        <option value="Snacks">Snacks</option>
+                        <option value="Household">Household</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Price ($)</label>
+                    <div class="price-wrap">
+                        <input type="number" class="form-input price-input" id="product-price" step="0.01" required>
+                        <select class="form-select price-unit-select" id="product-price-unit" aria-label="Price unit">
+                            <option value="piece">per piece</option>
+                            <option value="lb">per lb</option>
+                            <option value="oz">per oz</option>
+                            <option value="g">per g</option>
+                            <option value="kg">per kg</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Barcode</label>
+                    <input type="text" class="form-input" id="product-barcode" required>
+                </div>
+                
+                <div class="form-group">
+                    <label class="form-label">Availability</label>
+                    <select class="form-select" id="product-availability" required>
+                        <option value="In Stock">In Stock</option>
+                        <option value="Out of Stock">Out of Stock</option>
+                    </select>
+                </div>
+
+                <!-- Images -->
+                <div class="form-group">
+                    <label class="form-label">Images (up to 2)</label>
+                    <div class="image-picker">
+                        <div class="image-carousel">
+                            <button type="button" class="carousel-nav prev" onclick="carouselPrev()" aria-label="Previous image">◀</button>
+                            <div class="carousel-viewport">
+                                <img id="carousel-image" alt="Preview" />
+                                <div id="carousel-empty" class="carousel-empty">No image selected</div>
+                            </div>
+                            <button type="button" class="carousel-nav next" onclick="carouselNext()" aria-label="Next image">▶</button>
+                        </div>
+                        <div class="image-dots" id="image-dots"></div>
+
+                        <div class="image-slots">
+                            <div class="image-slot" id="slot-0">
+                                <input type="file" id="file-0" accept="image/*" hidden onchange="onSelectImage(event, 0)">
+                                <label for="file-0" class="slot-drop">Add/Replace Image 1</label>
+                                <button type="button" class="slot-remove" onclick="removeImage(0)">Remove</button>
+                            </div>
+                            <div class="image-slot" id="slot-1">
+                                <input type="file" id="file-1" accept="image/*" hidden onchange="onSelectImage(event, 1)">
+                                <label for="file-1" class="slot-drop">Add/Replace Image 2</label>
+                                <button type="button" class="slot-remove" onclick="removeImage(1)">Remove</button>
+                            </div>
+                        </div>
+                        <div class="image-hint">Recommended minimum: 760 × 600 px. Smaller images will be rejected. Any image format is allowed.</div>
+                    </div>
+                </div>
+            </form>
+            
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+                <button class="btn-save" onclick="saveProduct()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

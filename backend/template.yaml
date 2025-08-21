@@ -1,0 +1,285 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: aliabab-inventory backend (dev/prod) - DynamoDB + API Gateway + Lambda
+
+Parameters:
+  StageName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+  ProjectName:
+    Type: String
+    Default: aliabab-inventory
+  Region:
+    Type: String
+    Default: us-east-1
+  DefaultPageSize:
+    Type: Number
+    Default: 50
+
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Timeout: 10
+    MemorySize: 256
+    Tracing: Active
+    Environment:
+      Variables:
+        TABLE_NAME: !Sub "${ProjectName}-${StageName}"
+        DEFAULT_PAGE_SIZE: !Ref DefaultPageSize
+        BUCKET_NAME: !Sub "${ProjectName}-${StageName}-images"
+
+Resources:
+  ProductTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${ProjectName}-${StageName}"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: gsi1_pk
+          AttributeType: S
+        - AttributeName: gsi1_sk
+          AttributeType: S
+        - AttributeName: gsi2_pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: gsi1_pk
+              KeyType: HASH
+            - AttributeName: gsi1_sk
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: gsi2_pk
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ProductImagesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${ProjectName}-${StageName}-images"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: ["PUT", "GET", "HEAD"]
+            AllowedOrigins: ["*"]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+
+  Api:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub "${ProjectName}-${StageName}-api"
+      StageName: !Ref StageName
+      EndpointConfiguration: REGIONAL
+      TracingEnabled: true
+      Cors:
+        AllowOrigin: "'*'"
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'*'"
+
+  ListProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: list.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt ProductTable.Arn
+                - !Sub "${ProductTable.Arn}/index/*"
+      Description: List products with optional filters and pagination
+      Events:
+        GetProducts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /products
+            Method: GET
+
+  CreateProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: create.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt ProductTable.Arn
+                - !Sub "${ProductTable.Arn}/index/*"
+            # Optional: read access to S3 to validate keys if needed later
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource:
+                - !GetAtt ProductImagesBucket.Arn
+                - !Sub "${ProductImagesBucket.Arn}/*"
+      Description: Create a product with barcode uniqueness
+      Events:
+        PostProduct:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /products
+            Method: POST
+
+  GetImageUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: get_image_url.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource:
+                - !Sub "${ProductImagesBucket.Arn}/*"
+      Events:
+        PostImageUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /image-url
+            Method: POST
+        OptionsImageUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /image-url
+            Method: OPTIONS
+
+  UpdateProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: update.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:PutItem
+                - dynamodb:Query
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt ProductTable.Arn
+                - !Sub "${ProductTable.Arn}/index/*"
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+                - s3:GetObject
+              Resource:
+                - !GetAtt ProductImagesBucket.Arn
+                - !Sub "${ProductImagesBucket.Arn}/*"
+      Description: Update a product
+      Events:
+        PutProduct:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /products/{id}
+            Method: PUT
+
+  DeleteProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: delete.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:DeleteItem
+                - dynamodb:GetItem
+              Resource:
+                - !GetAtt ProductTable.Arn
+            - Effect: Allow
+              Action:
+                - s3:DeleteObject
+                - s3:GetObject
+                - s3:ListBucket
+              Resource:
+                - !GetAtt ProductImagesBucket.Arn
+                - !Sub "${ProductImagesBucket.Arn}/*"
+      Description: Delete a product
+      Events:
+        DeleteProduct:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /products/{id}
+            Method: DELETE
+
+  GetUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: upload_url.handler
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:PutObjectAcl
+              Resource:
+                - !Sub "${ProductImagesBucket.Arn}/*"
+      Events:
+        PostUploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /upload-url
+            Method: POST
+        OptionsUploadUrl:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /upload-url
+            Method: OPTIONS
+
+Outputs:
+  ApiBaseUrl:
+    Description: API base URL
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${StageName}"
+  TableName:
+    Description: DynamoDB table name
+    Value: !Ref ProductTable
