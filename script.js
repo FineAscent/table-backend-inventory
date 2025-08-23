@@ -1,5 +1,5 @@
  // Backend API Configuration
-        const API_BASE_URL = 'https://fqnz42nyi8.execute-api.us-east-1.amazonaws.com/dev';
+        const API_BASE_URL = 'https://w2bspt32w4.execute-api.us-east-1.amazonaws.com/prod';
 
         // Global variables
         let products = [];
