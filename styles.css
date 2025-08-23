@@ -612,3 +612,61 @@
             font-size: 12px;
             color: #888;
         }
+
+        /* Auth UI (Login/Logout & Signed-in label) */
+        .signed-in-msg {
+            color: #d1d5db; /* light gray on dark header */
+            font-size: 12px;
+            line-height: 1;
+            max-width: 220px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .auth-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            background: #475569; /* slate-600 */
+            color: #fff;
+            font-size: 13px;
+            line-height: 1.2;
+            cursor: pointer;
+            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
+        }
+
+        /* Primary emphasis for Login */
+        #login-btn.auth-btn {
+            background: #1677ff;
+        }
+        #login-btn.auth-btn:hover { background: #3c94ff; }
+        #login-btn.auth-btn:active { background: #0f67e6; }
+
+        /* Subtle style for Logout */
+        #logout-btn.auth-btn {
+            background: transparent;
+            border-color: rgba(255,255,255,0.35);
+            color: #e5e7eb;
+        }
+        #logout-btn.auth-btn:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(255,255,255,0.55);
+            color: #fff;
+        }
+
+        .auth-btn:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(255,255,255,0.25);
+        }
+
+        /* Ensure header actions wrap nicely on small screens */
+        @media (max-width: 640px) {
+            .header-actions { gap: 10px; }
+            .signed-in-msg { max-width: 120px; font-size: 11px; }
+            .publish-btn { padding: 6px 10px; font-size: 13px; }
+            .auth-btn { padding: 6px 10px; font-size: 12px; }
+        }
