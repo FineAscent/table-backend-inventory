@@ -94,6 +94,12 @@ Resources:
       StageName: !Ref StageName
       EndpointConfiguration: REGIONAL
       TracingEnabled: true
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt AdminUserPool.Arn
+            Identity:
+              Header: Authorization
       Cors:
         AllowOrigin: "'*'"
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
@@ -157,6 +163,8 @@ Resources:
             RestApiId: !Ref Api
             Path: /products
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   GetImageUrlFunction:
     Type: AWS::Serverless::Function
@@ -216,6 +224,8 @@ Resources:
             RestApiId: !Ref Api
             Path: /products/{id}
             Method: PUT
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   DeleteProductFunction:
     Type: AWS::Serverless::Function
@@ -247,6 +257,8 @@ Resources:
             RestApiId: !Ref Api
             Path: /products/{id}
             Method: DELETE
+            Auth:
+              Authorizer: CognitoAuthorizer
 
   GetUploadUrlFunction:
     Type: AWS::Serverless::Function
@@ -269,12 +281,58 @@ Resources:
             RestApiId: !Ref Api
             Path: /upload-url
             Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
         OptionsUploadUrl:
           Type: Api
           Properties:
             RestApiId: !Ref Api
             Path: /upload-url
             Method: OPTIONS
+
+  # Cognito resources for Admin authentication
+  AdminUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub "${ProjectName}-${StageName}-admin-pool"
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+
+  AdminUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      UserPoolId: !Ref AdminUserPool
+      ClientName: !Sub "${ProjectName}-${StageName}-admin-client"
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      AllowedOAuthFlows:
+        - code
+        - implicit
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - !Sub "https://fineascent.github.io/table-backend-inventory/"
+      LogoutURLs:
+        - !Sub "https://fineascent.github.io/table-backend-inventory/"
+
+  AdminUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub "${ProjectName}-${StageName}-admin"
+      UserPoolId: !Ref AdminUserPool
 
 Outputs:
   ApiBaseUrl:
@@ -283,3 +341,12 @@ Outputs:
   TableName:
     Description: DynamoDB table name
     Value: !Ref ProductTable
+  AdminUserPoolId:
+    Description: Cognito User Pool ID for Admin
+    Value: !Ref AdminUserPool
+  AdminUserPoolClientId:
+    Description: Cognito App Client ID for Admin
+    Value: !Ref AdminUserPoolClient
+  AdminCognitoDomain:
+    Description: Cognito Hosted UI domain
+    Value: !Sub "https://${AdminUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com"

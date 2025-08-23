@@ -1,6 +1,70 @@
  // Backend API Configuration
         const API_BASE_URL = 'https://w2bspt32w4.execute-api.us-east-1.amazonaws.com/prod';
 
+        // Cognito (Admin) Auth Configuration
+        const COGNITO_DOMAIN = 'https://aliabab-inventory-prod-admin.auth.us-east-1.amazoncognito.com';
+        const COGNITO_CLIENT_ID = '7ujm0u63v834c054nf9juh3ook';
+        const REDIRECT_URI = 'https://fineascent.github.io/table-backend-inventory/';
+
+        // Simple auth state helpers
+        function getIdToken() {
+            return window.localStorage.getItem('id_token') || '';
+        }
+
+        function setIdToken(token) {
+            if (token) window.localStorage.setItem('id_token', token);
+        }
+
+        function clearSession() {
+            window.localStorage.removeItem('id_token');
+        }
+
+        function parseHashForToken() {
+            if (window.location.hash && window.location.hash.includes('id_token')) {
+                const params = new URLSearchParams(window.location.hash.substring(1));
+                const idToken = params.get('id_token');
+                if (idToken) {
+                    setIdToken(idToken);
+                    // Clean hash from URL
+                    history.replaceState(null, document.title, window.location.pathname + window.location.search);
+                }
+            }
+        }
+
+        function decodeJwtPayload(token) {
+            try {
+                const parts = token.split('.');
+                if (parts.length !== 3) return {};
+                const payload = parts[1]
+                    .replace(/-/g, '+')
+                    .replace(/_/g, '/');
+                const json = atob(payload);
+                return JSON.parse(json);
+            } catch { return {}; }
+        }
+
+        function getSignedInEmail() {
+            const t = getIdToken();
+            if (!t) return '';
+            const p = decodeJwtPayload(t);
+            return p.email || p['cognito:username'] || '';
+        }
+
+        function isLoggedIn() {
+            return !!getIdToken();
+        }
+
+        function login() {
+            const url = `${COGNITO_DOMAIN}/oauth2/authorize?client_id=${encodeURIComponent(COGNITO_CLIENT_ID)}&response_type=token&scope=openid+email+profile&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
+            window.location.href = url;
+        }
+
+        function logout() {
+            const logoutUrl = `${COGNITO_DOMAIN}/logout?client_id=${encodeURIComponent(COGNITO_CLIENT_ID)}&logout_uri=${encodeURIComponent(REDIRECT_URI)}`;
+            clearSession();
+            window.location.href = logoutUrl;
+        }
+
         // Global variables
         let products = [];
         let currentEditingId = null;
@@ -20,6 +84,20 @@
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
+            parseHashForToken();
+            const email = getSignedInEmail();
+            const signedMsg = document.getElementById('signed-in-msg');
+            const loginBtn = document.getElementById('login-btn');
+            const logoutBtn = document.getElementById('logout-btn');
+            if (isLoggedIn()) {
+                if (signedMsg) signedMsg.textContent = `signed user in to this admin at ${email}`;
+                if (loginBtn) loginBtn.style.display = 'none';
+                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+            } else {
+                if (signedMsg) signedMsg.textContent = '';
+                if (loginBtn) loginBtn.style.display = 'inline-flex';
+                if (logoutBtn) logoutBtn.style.display = 'none';
+            }
             loadProducts();
         });
 
@@ -59,9 +137,12 @@
                     imageKeys: Array.isArray(product.imageKeys) ? product.imageKeys : [],
                     deleteKeys: Array.isArray(product.deleteKeys) ? product.deleteKeys : undefined
                 });
+                const headers = { 'Content-Type': 'application/json' };
+                const token = getIdToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
                 const resp = await fetch(url, {
                     method,
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     body
                 });
                 if (!resp.ok) {
@@ -72,9 +153,12 @@
             }
 
             async getUploadUrl({ fileName, contentType, productId }) {
+                const headers = { 'Content-Type': 'application/json' };
+                const token = getIdToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
                 const resp = await fetch(`${API_BASE_URL}/upload-url`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     body: JSON.stringify({ fileName, contentType, productId })
                 });
                 if (!resp.ok) {
@@ -101,7 +185,10 @@
             }
 
             async deleteProduct(id) {
-                const resp = await fetch(`${API_BASE_URL}/products/${encodeURIComponent(id)}`, { method: 'DELETE' });
+                const headers = {};
+                const token = getIdToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const resp = await fetch(`${API_BASE_URL}/products/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
                 if (!resp.ok && resp.status !== 204) {
                     const t = await resp.text();
                     throw new Error(`Delete failed (${resp.status}): ${t}`);
