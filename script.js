@@ -224,7 +224,7 @@
                 const row = document.createElement('tr');
                 const thumbCellId = `thumb-${product.id}`;
                 const unit = (product.priceUnit || 'piece');
-                const unitLabelMap = { piece: 'piece', lb: 'lb', oz: 'oz', g: 'g', kg: 'kg' };
+                const unitLabelMap = { piece: 'piece', lb: 'lb', oz: 'oz', g: 'g', kg: 'kg', gallon: 'gallon', dozen: 'dozen', loaf: 'loaf', bag: 'bag', bags: 'bags', carton: 'carton', block: 'block', jar: 'jar', cup: 'cup', box: 'box', pack: 'pack', can: 'can', bottle: 'bottle' };
                 const unitLabel = unitLabelMap[unit] || unit;
                 row.innerHTML = `
                     <td>
@@ -712,12 +712,12 @@ async function onCsvSelected(e) {
         showLoading(true);
         const text = await file.text();
         const { headers, rows } = parseCsv(text);
-        const expected = ['name','description','availability','barcode','category','price','priceUnit'];
-        if (!arraysEqual(headers, expected)) {
-            showError('CSV header mismatch. Expected: ' + expected.join(', '));
+        const headerInfo = buildHeaderMap(headers);
+        if (!headerInfo.ok) {
+            showError('CSV header mismatch. Required columns: name, description, category, price, barcode, availability, priceUnit');
             return;
         }
-        const { toImport, errors } = validateCsvRows(rows, expected);
+        const { toImport, errors } = validateCsvRows(rows, headerInfo);
         if (errors.length) {
             const sample = errors.slice(0, 5).map(er => `Row ${er.row}: ${er.message}`).join('<br>');
             showError(`Some rows invalid. Importing valid rows. Errors:<br>${sample}${errors.length>5?'\n...':''}`);
@@ -805,32 +805,36 @@ function parseCsvLine(line) {
     return result.map(s => s.trim());
 }
 
-function validateCsvRows(rows, headers) {
-    const allowedAvail = ['In Stock','Out of Stock'];
-    const allowedUnits = ['piece','lb','oz','g','kg'];
+function validateCsvRows(rows, headerInfo) {
+    const allowedUnits = ['piece','lb','oz','g','kg','gallon','dozen','loaf','bag','bags','carton','block','jar','cup','box','pack','can','bottle'];
     const toImport = [];
     const errors = [];
     for (let i = 0; i < rows.length; i++) {
         const cols = rows[i];
-        if (cols.length !== headers.length) {
-            errors.push({ row: i+2, message: `Expected ${headers.length} columns, got ${cols.length}` });
+        if (cols.length < headerInfo.count) {
+            errors.push({ row: i+2, message: `Expected at least ${headerInfo.count} columns, got ${cols.length}` });
             continue;
         }
         const obj = {};
-        headers.forEach((h, idx) => obj[h] = cols[idx]);
+        // Build object using mapped indices
+        for (const key of Object.keys(headerInfo.map)) {
+            const idx = headerInfo.map[key];
+            obj[key] = (idx >= 0 ? cols[idx] : '');
+        }
         const required = ['name','description','category','price','barcode','availability'];
         let bad = null;
         for (const k of required) {
-            if (obj[k] === undefined || obj[k] === null || obj[k] === '') { bad = `${k} is required`; break; }
+            if (obj[k] === undefined || obj[k] === null || String(obj[k]).trim() === '') { bad = `${k} is required`; break; }
         }
         if (!bad) {
-            const price = Number(obj.price);
+            const price = Number(cleanPrice(String(obj.price)));
             if (!Number.isFinite(price)) bad = 'price must be a number';
             else obj.price = price;
         }
-        if (!bad && !allowedAvail.includes(obj.availability)) bad = 'availability must be In Stock or Out of Stock';
+        if (!bad) obj.availability = normalizeAvailability(String(obj.availability));
+        if (!bad && !obj.availability) bad = 'availability must be In Stock or Out of Stock';
         if (!bad) {
-            const unit = obj.priceUnit && obj.priceUnit.trim() ? obj.priceUnit.trim() : 'piece';
+            const unit = normalizeUnit(String(obj.priceUnit || 'piece'));
             if (!allowedUnits.includes(unit)) bad = 'priceUnit must be one of ' + allowedUnits.join(', ');
             else obj.priceUnit = unit;
         }
@@ -841,6 +845,78 @@ function validateCsvRows(rows, headers) {
         toImport.push(obj);
     }
     return { toImport, errors };
+}
+
+// Build a flexible header map: case-insensitive, ignore spaces/underscores, allow synonyms
+function buildHeaderMap(headers) {
+    const canon = name => name.toLowerCase().replace(/[_\s]+/g, '');
+    const synonyms = {
+        name: ['name','product','productname'],
+        description: ['description','desc','details'],
+        availability: ['availability','status','stock'],
+        barcode: ['barcode','sku','code','upc','ean'],
+        category: ['category','cat','type'],
+        price: ['price','amount','cost'],
+        priceUnit: ['priceunit','unit','uom','price_unit','per','perunit']
+    };
+    const required = ['name','description','availability','barcode','category','price','priceUnit'];
+    const map = {};
+    for (let i = 0; i < headers.length; i++) {
+        const h = canon(headers[i] || '');
+        for (const key of Object.keys(synonyms)) {
+            if (synonyms[key].some(s => canon(s) === h)) {
+                if (map[key] === undefined) map[key] = i;
+            }
+        }
+    }
+    const ok = required.every(k => map[k] !== undefined);
+    return { ok, map, count: Object.keys(map).length };
+}
+
+// Normalize availability to exact values
+function normalizeAvailability(val) {
+    const v = (val || '').toString().trim().toLowerCase();
+    if (!v) return '';
+    const inStock = ['in stock','instock','available','yes','y','1'];
+    const outStock = ['out of stock','outofstock','out','oos','unavailable','no','n','0'];
+    if (inStock.includes(v)) return 'In Stock';
+    if (outStock.includes(v)) return 'Out of Stock';
+    // Try partial matches
+    if (v.includes('in') && v.includes('stock')) return 'In Stock';
+    if (v.includes('out') && v.includes('stock')) return 'Out of Stock';
+    return '';
+}
+
+// Normalize unit: lowercase, singularize common plurals, accept "per x" formats
+function normalizeUnit(val) {
+    let u = (val || '').toString().trim().toLowerCase();
+    if (!u) return 'piece';
+    u = u.replace(/^per\s+/, '');
+    const map = {
+        pieces: 'piece', pcs: 'piece', piece: 'piece',
+        lbs: 'lb', pound: 'lb', pounds: 'lb', lb: 'lb',
+        ounces: 'oz', ounce: 'oz', oz: 'oz',
+        grams: 'g', gram: 'g', g: 'g',
+        kilograms: 'kg', kilogram: 'kg', kg: 'kg',
+        gallons: 'gallon', gallon: 'gallon',
+        dozens: 'dozen', dozen: 'dozen',
+        loaves: 'loaf', loaf: 'loaf',
+        bags: 'bags', bag: 'bag',
+        cartons: 'carton', carton: 'carton',
+        blocks: 'block', block: 'block',
+        jars: 'jar', jar: 'jar',
+        cups: 'cup', cup: 'cup',
+        boxes: 'box', box: 'box',
+        packs: 'pack', pack: 'pack',
+        cans: 'can', can: 'can',
+        bottles: 'bottle', bottle: 'bottle'
+    };
+    return map[u] || u;
+}
+
+// Clean price string: remove $ and commas and spaces
+function cleanPrice(val) {
+    return (val || '').toString().replace(/[$,\s]/g, '');
 }
 
 // Expose CSV handlers for inline HTML attributes
