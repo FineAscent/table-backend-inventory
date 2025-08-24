@@ -74,6 +74,8 @@
         // Existing images for currently edited product
         let existingImageKeys = [null, null];
         let deleteKeys = [];
+        // Staged items from CSV (not yet saved to backend)
+        let stagedItems = [];
         // Search state
         let searchTerm = '';
         let filters = {
@@ -223,7 +225,9 @@
         // Render products in the table
         function renderProducts() {
             const tbody = document.getElementById('products-tbody');
-            const filteredProducts = applyFilters(products);
+            // Merge backend products with staged items for display
+            const combined = [...products, ...stagedItems];
+            const filteredProducts = applyFilters(combined);
 
             tbody.innerHTML = '';
             // Update product count badge
@@ -236,19 +240,22 @@
                 const unit = (product.priceUnit || 'piece');
                 const unitLabelMap = { piece: 'piece', lb: 'lb', oz: 'oz', g: 'g', kg: 'kg', gallon: 'gallon', dozen: 'dozen', loaf: 'loaf', bag: 'bag', bags: 'bags', carton: 'carton', block: 'block', jar: 'jar', cup: 'cup', box: 'box', pack: 'pack', can: 'can', bottle: 'bottle' };
                 const unitLabel = unitLabelMap[unit] || unit;
+                const stagedBadge = product._staged ? '<span class="staged-badge">Staged</span>' : '';
                 row.innerHTML = `
                     <td>
                         <div class="product-image" id="${thumbCellId}">📷</div>
                     </td>
-                    <td><span class="product-name">${product.name}</span></td>
+                    <td><span class="product-name">${product.name}</span> ${stagedBadge}</td>
                     <td>${product.description}</td>
                     <td><span class="status-badge ${product.availability === 'In Stock' ? 'status-in-stock' : 'status-out-of-stock'}">${product.availability}</span></td>
                     <td>${product.barcode}</td>
                     <td>${product.category}</td>
                     <td><span class="price">$${product.price.toFixed(2)} / ${unitLabel}</span></td>
                     <td>
-                        <button class="action-btn" onclick="editProduct('${product.id}')">Edit</button>
-                        <button class="action-btn delete-btn" onclick="deleteProduct('${product.id}')">Delete</button>
+                        ${product._staged
+                            ? `<button class="action-btn delete-btn" onclick="removeStaged('${product.id}')">Remove</button>`
+                            : `<button class=\"action-btn\" onclick=\"editProduct('${product.id}')\">Edit</button>
+                               <button class=\"action-btn delete-btn\" onclick=\"deleteProduct('${product.id}')\">Delete</button>`}
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -455,9 +462,38 @@
             document.getElementById('modal-error').innerHTML = '';
         }
 
-        // Publish changes (placeholder function)
-        function publishChanges() {
-            showSuccess('Changes published successfully!');
+        // Publish changes: persist staged items to backend, then reload
+        async function publishChanges() {
+            if (!stagedItems.length) {
+                showSuccess('No staged changes to publish.');
+                return;
+            }
+            try {
+                showLoading(true);
+                let success = 0; let fail = 0;
+                for (const p of stagedItems) {
+                    try {
+                        await dbService.putProduct({
+                            name: p.name,
+                            description: p.description,
+                            category: p.category,
+                            price: Number(p.price),
+                            priceUnit: p.priceUnit || 'piece',
+                            barcode: p.barcode,
+                            availability: p.availability,
+                            imageKeys: []
+                        });
+                        success++;
+                    } catch (_) { fail++; }
+                }
+                stagedItems = [];
+                await loadProducts();
+                showSuccess(`Published. Added: ${success}. Failed: ${fail}.`);
+            } catch (err) {
+                showError('Publish failed: ' + err.message);
+            } finally {
+                showLoading(false);
+            }
         }
 
         // Close modal when clicking outside
@@ -764,29 +800,28 @@ async function onCsvSelected(e) {
             const sample = dupErrors.slice(0, 5).map(er => `Row ${er.row}: ${er.message}`).join('<br>');
             showError(`Duplicates skipped:<br>${sample}${dupErrors.length>5?'\n...':''}`);
         }
-        let success = 0; let fail = 0;
-        for (let i = 0; i < filtered.length; i++) {
-            const p = filtered[i];
-            try {
-                await dbService.putProduct({
-                    name: p.name,
-                    description: p.description,
-                    availability: p.availability,
-                    barcode: p.barcode,
-                    category: p.category,
-                    price: Number(p.price),
-                    priceUnit: p.priceUnit || 'piece',
-                    imageKeys: []
-                });
-                success++;
-            } catch (err) {
-                fail++;
-            }
-        }
+        // Stage filtered items locally instead of saving to backend
+        const before = stagedItems.length;
+        const makeTempId = i => `staged-${Date.now()}-${i}-${Math.random().toString(36).slice(2,8)}`;
+        filtered.forEach((p, idx) => {
+            stagedItems.push({
+                id: makeTempId(idx),
+                name: p.name,
+                description: p.description,
+                category: p.category,
+                price: Number(p.price),
+                priceUnit: p.priceUnit || 'piece',
+                barcode: p.barcode,
+                availability: p.availability,
+                imageKeys: [],
+                _staged: true
+            });
+        });
+        const added = stagedItems.length - before;
         const invalidCount = errors.length;
         const dupCount = dupErrors.length;
-        showSuccess(`Import complete. Added: ${success}. Skipped - invalid: ${invalidCount}, duplicates: ${dupCount}, failed on save: ${fail}.`);
-        if (success > 0) await loadProducts();
+        showSuccess(`Import staged. Staged: ${added}. Skipped - invalid: ${invalidCount}, duplicates: ${dupCount}. Use Publish to save.`);
+        renderProducts();
     } catch (err) {
         showError('CSV import failed: ' + err.message);
     } finally {
@@ -936,19 +971,20 @@ function normalizeAvailability(val) {
 function normalizeUnit(val) {
     let u = (val || '').toString().trim().toLowerCase();
     if (!u) return 'piece';
+    // handle prefixes like "per kg", "per  kg"
     u = u.replace(/^per\s+/, '');
     // remove internal spaces (e.g., "l b" -> "lb")
     u = u.replace(/\s+/g, '');
     const map = {
         pieces: 'piece', pcs: 'piece', piece: 'piece',
-        lbs: 'lb', pound: 'lb', pounds: 'lb', lb: 'lb', ib: 'lb', // handle common typo 'Ib'
+        lbs: 'lb', pound: 'lb', pounds: 'lb', lb: 'lb', ib: 'lb', lbr: 'lb',
         ounces: 'oz', ounce: 'oz', oz: 'oz',
         grams: 'g', gram: 'g', g: 'g',
-        kilograms: 'kg', kilogram: 'kg', kg: 'kg',
+        kilograms: 'kg', kilogram: 'kg', kg: 'kg', kgs: 'kg',
         gallons: 'gallon', gallon: 'gallon',
         dozens: 'dozen', dozen: 'dozen',
         loaves: 'loaf', loaf: 'loaf',
-        bags: 'bags', bag: 'bag',
+        bags: 'bags', bag: 'bag', baglb: 'lb', // support patterns like "bag lb"
         cartons: 'carton', carton: 'carton',
         blocks: 'block', block: 'block',
         jars: 'jar', jar: 'jar',
@@ -974,3 +1010,8 @@ function cleanPrice(val) {
 // Expose CSV handlers for inline HTML attributes
 window.triggerCsvPick = triggerCsvPick;
 window.onCsvSelected = onCsvSelected;
+window.publishChanges = publishChanges;
+window.removeStaged = function(id) {
+    stagedItems = stagedItems.filter(p => p.id !== id);
+    renderProducts();
+};
