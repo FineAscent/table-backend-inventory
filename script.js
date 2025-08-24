@@ -345,6 +345,7 @@
         // Open add product modal
         function openAddProductModal() {
             currentEditingId = null;
+            currentEditingIsPending = false;
             document.getElementById('modal-title').textContent = 'Add Product';
             document.getElementById('product-form').reset();
             document.getElementById('product-modal').style.display = 'block';
@@ -482,6 +483,8 @@
         function closeModal() {
             document.getElementById('product-modal').style.display = 'none';
             document.getElementById('modal-error').innerHTML = '';
+            currentEditingId = null;
+            currentEditingIsPending = false;
         }
 
         // Publish pending staged items to backend
@@ -623,17 +626,6 @@ async function deleteProduct(id) {
             showError('Failed to delete product: ' + error.message);
         }
     }
-}
-
-// Close modal
-function closeModal() {
-    document.getElementById('product-modal').style.display = 'none';
-    document.getElementById('modal-error').innerHTML = '';
-}
-
-// Publish changes (placeholder function)
-function publishChanges() {
-    showSuccess('Changes published successfully!');
 }
 
 // Close modal when clicking outside
@@ -1043,3 +1035,8 @@ function cleanPrice(val) {
 // Expose CSV handlers for inline HTML attributes
 window.triggerCsvPick = triggerCsvPick;
 window.onCsvSelected = onCsvSelected;
+// Expose UI actions
+window.publishChanges = publishChanges;
+window.editProduct = editProduct;
+window.deleteProduct = deleteProduct;
+window.openAddProductModal = openAddProductModal;
