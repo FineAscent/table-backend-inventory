@@ -112,11 +112,18 @@
             }
 
             async scanProducts() {
+                const headers = {};
+                const token = getIdToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
                 const resp = await fetch(`${API_BASE_URL}/products`, {
-                    method: 'GET'
+                    method: 'GET',
+                    headers
                 });
                 if (!resp.ok) {
                     const t = await resp.text();
+                    if (resp.status === 401) {
+                        throw new Error('Unauthorized. Please login to access products.');
+                    }
                     throw new Error(`List failed (${resp.status}): ${t}`);
                 }
                 return resp.json(); // expected shape: { items: [...], nextToken? }
