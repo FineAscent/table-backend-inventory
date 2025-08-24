@@ -103,7 +103,7 @@ Resources:
       Cors:
         AllowOrigin: "'*'"
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,authorization,X-Api-Key,X-Amz-Security-Token,x-requested-with'"
 
   ListProductsFunction:
     Type: AWS::Serverless::Function
@@ -186,12 +186,6 @@ Resources:
             RestApiId: !Ref Api
             Path: /image-url
             Method: POST
-        OptionsImageUrl:
-          Type: Api
-          Properties:
-            RestApiId: !Ref Api
-            Path: /image-url
-            Method: OPTIONS
 
   UpdateProductFunction:
     Type: AWS::Serverless::Function
@@ -283,12 +277,6 @@ Resources:
             Method: POST
             Auth:
               Authorizer: CognitoAuthorizer
-        OptionsUploadUrl:
-          Type: Api
-          Properties:
-            RestApiId: !Ref Api
-            Path: /upload-url
-            Method: OPTIONS
 
   # Cognito resources for Admin authentication
   AdminUserPool:
