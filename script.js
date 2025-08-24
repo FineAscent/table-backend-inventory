@@ -509,6 +509,7 @@
                 showLoading(true);
                 updatePublishButton();
                 let success = 0, fail = 0;
+                let firstError = '';
                 for (const p of pendingProducts) {
                     try {
                         const payload = {
@@ -519,16 +520,21 @@
                             priceUnit: p.priceUnit || 'piece',
                             barcode: p.barcode,
                             availability: p.availability,
-                            imageKeys: Array.isArray(p.imageKeys) ? p.imageKeys : []
+                            imageKeys: []
                         };
                         await dbService.putProduct(payload);
                         success++;
-                    } catch (_) {
+                    } catch (err) {
                         fail++;
+                        if (!firstError) firstError = (err && err.message) ? err.message : 'Unknown error';
                     }
                 }
                 pendingProducts = [];
-                showSuccess(`Publish complete. Added: ${success}. Failed: ${fail}.`);
+                if (fail > 0) {
+                    showError(`Publish completed with errors. Added: ${success}. Failed: ${fail}. Example error: ${firstError}`);
+                } else {
+                    showSuccess(`Publish complete. Added: ${success}. Failed: ${fail}.`);
+                }
                 await loadProducts();
                 updatePublishButton();
             } catch (e) {
