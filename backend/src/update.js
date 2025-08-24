@@ -21,7 +21,10 @@ function validate(body) {
   if (!['In Stock', 'Out of Stock'].includes(body.availability)) return 'availability must be In Stock or Out of Stock';
   if (body.priceUnit !== undefined && body.priceUnit !== null) {
     if (typeof body.priceUnit !== 'string') return 'priceUnit must be a string';
-    // accept any string; frontend normalizes common variants
+    const unit = String(body.priceUnit).trim().toLowerCase();
+    const allowed = ['piece','lb','oz','g','kg','gallon','dozen','loaf','bag','bags','carton','block','jar','cup','box','pack','can','bottle'];
+    if (!allowed.includes(unit)) return 'priceUnit must be one of ' + allowed.join(', ');
+    body.priceUnit = unit; // normalize
   }
   if (body.imageKeys !== undefined) {
     if (!Array.isArray(body.imageKeys)) return 'imageKeys must be an array of strings';
