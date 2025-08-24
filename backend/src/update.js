@@ -20,8 +20,8 @@ function validate(body) {
   if (typeof body.price !== 'number' || Number.isNaN(body.price)) return 'price must be a number';
   if (!['In Stock', 'Out of Stock'].includes(body.availability)) return 'availability must be In Stock or Out of Stock';
   if (body.priceUnit !== undefined) {
-    const allowed = ['piece', 'lb', 'oz', 'g', 'kg'];
-    if (!allowed.includes(body.priceUnit)) return 'priceUnit must be one of piece, lb, oz, g, kg';
+    const allowed = ['piece','lb','oz','g','kg','gallon','dozen','loaf','bag','bags','carton','block','jar','cup','box','pack','can','bottle'];
+    if (!allowed.includes(body.priceUnit)) return 'priceUnit must be one of ' + allowed.join(', ');
   }
   if (body.imageKeys !== undefined) {
     if (!Array.isArray(body.imageKeys)) return 'imageKeys must be an array of strings';
