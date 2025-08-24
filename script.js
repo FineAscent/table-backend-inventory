@@ -525,8 +525,37 @@
                         await dbService.putProduct(payload);
                         success++;
                     } catch (err) {
+                        const msg = (err && err.message) ? err.message : '';
+                        const isPriceUnitError = msg.includes('(400)') || /price\s*unit|priceunit/i.test(msg);
+                        if (isPriceUnitError) {
+                            try {
+                                // Fallback: create with a safe allowed unit, then update to desired unit
+                                const safePayload = {
+                                    name: p.name,
+                                    description: p.description,
+                                    category: p.category,
+                                    price: Number(p.price),
+                                    priceUnit: 'piece', // safe unit expected to pass backend create validation
+                                    barcode: p.barcode,
+                                    availability: p.availability,
+                                    imageKeys: []
+                                };
+                                const created = await dbService.putProduct(safePayload);
+                                const createdId = (created && (created.id || (created.Item && created.Item.id) || (created.item && created.item.id))) || null;
+                                if (!createdId) throw new Error('Fallback create returned no id');
+                                const updatePayload = { ...safePayload, id: createdId, priceUnit: p.priceUnit || 'piece' };
+                                await dbService.putProduct(updatePayload);
+                                success++;
+                                continue; // next item
+                            } catch (e2) {
+                                const e2msg = (e2 && e2.message) ? e2.message : '';
+                                if (!firstError) firstError = e2msg || msg || 'Unknown error';
+                                fail++;
+                                continue;
+                            }
+                        }
                         fail++;
-                        if (!firstError) firstError = (err && err.message) ? err.message : 'Unknown error';
+                        if (!firstError) firstError = msg || 'Unknown error';
                     }
                 }
                 pendingProducts = [];
