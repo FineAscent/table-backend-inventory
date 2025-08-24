@@ -725,13 +725,45 @@ async function onCsvSelected(e) {
             return;
         }
         const { toImport, errors } = validateCsvRows(rows, headerInfo);
+        // Build sets to avoid duplicates: existing names and names within the file
+        let existingNameSet = new Set();
+        try {
+            const list = await dbService.scanProducts();
+            const items = list.items || list.Items || [];
+            existingNameSet = new Set(items.map(p => normalizeName(p.name || '')));
+        } catch (_) { /* ignore listing error; proceed with file-only dedupe */ }
+        const seenInFile = new Set();
+
+        const filtered = [];
+        const dupErrors = [];
+        for (const obj of toImport) {
+            const key = normalizeName(obj.name || '');
+            if (!key) {
+                dupErrors.push({ row: obj.__row || '?', message: 'name is required' });
+                continue;
+            }
+            if (existingNameSet.has(key)) {
+                dupErrors.push({ row: obj.__row || '?', message: 'duplicate name (already exists): ' + obj.name });
+                continue;
+            }
+            if (seenInFile.has(key)) {
+                dupErrors.push({ row: obj.__row || '?', message: 'duplicate name in CSV: ' + obj.name });
+                continue;
+            }
+            seenInFile.add(key);
+            filtered.push(obj);
+        }
         if (errors.length) {
             const sample = errors.slice(0, 5).map(er => `Row ${er.row}: ${er.message}`).join('<br>');
             showError(`Some rows invalid. Importing valid rows. Errors:<br>${sample}${errors.length>5?'\n...':''}`);
         }
+        if (dupErrors.length) {
+            const sample = dupErrors.slice(0, 5).map(er => `Row ${er.row}: ${er.message}`).join('<br>');
+            showError(`Duplicates skipped:<br>${sample}${dupErrors.length>5?'\n...':''}`);
+        }
         let success = 0; let fail = 0;
-        for (let i = 0; i < toImport.length; i++) {
-            const p = toImport[i];
+        for (let i = 0; i < filtered.length; i++) {
+            const p = filtered[i];
             try {
                 await dbService.putProduct({
                     name: p.name,
@@ -748,7 +780,9 @@ async function onCsvSelected(e) {
                 fail++;
             }
         }
-        showSuccess(`Import complete. Added: ${success}. Failed: ${fail + errors.length}.`);
+        const invalidCount = errors.length;
+        const dupCount = dupErrors.length;
+        showSuccess(`Import complete. Added: ${success}. Skipped - invalid: ${invalidCount}, duplicates: ${dupCount}, failed on save: ${fail}.`);
         if (success > 0) await loadProducts();
     } catch (err) {
         showError('CSV import failed: ' + err.message);
@@ -849,6 +883,7 @@ function validateCsvRows(rows, headerInfo) {
             errors.push({ row: i+2, message: bad });
             continue;
         }
+        obj.__row = i + 2; // preserve original row for later messages
         toImport.push(obj);
     }
     return { toImport, errors };
@@ -899,9 +934,11 @@ function normalizeUnit(val) {
     let u = (val || '').toString().trim().toLowerCase();
     if (!u) return 'piece';
     u = u.replace(/^per\s+/, '');
+    // remove internal spaces (e.g., "l b" -> "lb")
+    u = u.replace(/\s+/g, '');
     const map = {
         pieces: 'piece', pcs: 'piece', piece: 'piece',
-        lbs: 'lb', pound: 'lb', pounds: 'lb', lb: 'lb',
+        lbs: 'lb', pound: 'lb', pounds: 'lb', lb: 'lb', ib: 'lb', // handle common typo 'Ib'
         ounces: 'oz', ounce: 'oz', oz: 'oz',
         grams: 'g', gram: 'g', g: 'g',
         kilograms: 'kg', kilogram: 'kg', kg: 'kg',
@@ -919,6 +956,11 @@ function normalizeUnit(val) {
         bottles: 'bottle', bottle: 'bottle'
     };
     return map[u] || u;
+}
+
+// Normalize name for duplicate detection
+function normalizeName(name) {
+    return (name || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 }
 
 // Clean price string: remove $ and commas and spaces
