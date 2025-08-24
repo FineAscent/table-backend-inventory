@@ -85,6 +85,16 @@
         // Pending products staged from CSV (not yet published to backend)
         let pendingProducts = [];
 
+        function updatePublishButton() {
+            const btn = document.querySelector('.publish-btn');
+            if (!btn) return;
+            const n = (pendingProducts || []).length;
+            btn.textContent = n > 0 ? `Publish (${n})` : 'Publish';
+            btn.disabled = n === 0;
+            btn.style.opacity = n === 0 ? '0.7' : '1';
+            btn.style.cursor = n === 0 ? 'not-allowed' : 'pointer';
+        }
+
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             parseHashForToken();
@@ -216,6 +226,7 @@
                 const result = await dbService.scanProducts();
                 products = result.items || result.Items || [];
                 renderProducts();
+                updatePublishButton();
             } catch (error) {
                 showError('Failed to load products: ' + error.message);
             } finally {
@@ -465,6 +476,7 @@
                 if (pendingProducts.length < before) {
                     showSuccess('Pending item removed.');
                     renderProducts();
+                    updatePublishButton();
                 }
                 return;
             }
@@ -495,6 +507,7 @@
             }
             try {
                 showLoading(true);
+                updatePublishButton();
                 let success = 0, fail = 0;
                 for (const p of pendingProducts) {
                     try {
@@ -517,6 +530,7 @@
                 pendingProducts = [];
                 showSuccess(`Publish complete. Added: ${success}. Failed: ${fail}.`);
                 await loadProducts();
+                updatePublishButton();
             } catch (e) {
                 showError('Publish failed: ' + e.message);
             } finally {
@@ -836,6 +850,7 @@ async function onCsvSelected(e) {
         const dupCount = dupErrors.length;
         showSuccess(`Imported ${staged.length} row(s) as pending. Skipped - invalid: ${invalidCount}, duplicates: ${dupCount}. Use Publish to save.`);
         renderProducts();
+        updatePublishButton();
     } catch (err) {
         showError('CSV import failed: ' + err.message);
     } finally {
