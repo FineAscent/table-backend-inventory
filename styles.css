@@ -628,23 +628,31 @@
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 6px 12px;
-            border-radius: 6px;
+            padding: 8px 14px;
+            min-height: 36px;
+            border-radius: 8px;
             border: 1px solid transparent;
             background: #475569; /* slate-600 */
             color: #fff;
-            font-size: 13px;
+            font-size: 14px;
+            font-weight: 600;
             line-height: 1.2;
             cursor: pointer;
+            -webkit-appearance: none;
+            appearance: none;
             transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
         }
 
         /* Primary emphasis for Login */
+        /* Keep login button prominently styled at all times */
+        #login-btn,
         #login-btn.auth-btn {
             background: #1677ff;
+            border-color: #1677ff;
+            color: #fff;
         }
-        #login-btn.auth-btn:hover { background: #3c94ff; }
-        #login-btn.auth-btn:active { background: #0f67e6; }
+        #login-btn:hover { background: #3c94ff; }
+        #login-btn:active { background: #0f67e6; }
 
         /* Subtle style for Logout */
         #logout-btn.auth-btn {
