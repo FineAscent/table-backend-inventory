@@ -68,7 +68,6 @@
         // Global variables
         let products = [];
         let currentEditingId = null;
-        let currentEditingIsPending = false;
         // Images selected in the modal (frontend-only for now)
         let selectedImages = [null, null]; // { file, url, width, height }
         let carouselIndex = 0;
@@ -82,18 +81,6 @@
         };
         // In-memory cache for signed GET URLs
         const imageUrlCache = new Map(); // key -> url
-        // Pending products staged from CSV (not yet published to backend)
-        let pendingProducts = [];
-
-        function updatePublishButton() {
-            const btn = document.querySelector('.publish-btn');
-            if (!btn) return;
-            const n = (pendingProducts || []).length;
-            btn.textContent = n > 0 ? `Publish (${n})` : 'Publish';
-            btn.disabled = n === 0;
-            btn.style.opacity = n === 0 ? '0.7' : '1';
-            btn.style.cursor = n === 0 ? 'not-allowed' : 'pointer';
-        }
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -226,7 +213,6 @@
                 const result = await dbService.scanProducts();
                 products = result.items || result.Items || [];
                 renderProducts();
-                updatePublishButton();
             } catch (error) {
                 showError('Failed to load products: ' + error.message);
             } finally {
@@ -234,11 +220,10 @@
             }
         }
 
-        // Render products in the table (includes staged pending items)
+        // Render products in the table
         function renderProducts() {
             const tbody = document.getElementById('products-tbody');
-            const combined = (products || []).concat(pendingProducts || []);
-            const filteredProducts = applyFilters(combined);
+            const filteredProducts = applyFilters(products);
 
             tbody.innerHTML = '';
             // Update product count badge
@@ -251,20 +236,19 @@
                 const unit = (product.priceUnit || 'piece');
                 const unitLabelMap = { piece: 'piece', lb: 'lb', oz: 'oz', g: 'g', kg: 'kg', gallon: 'gallon', dozen: 'dozen', loaf: 'loaf', bag: 'bag', bags: 'bags', carton: 'carton', block: 'block', jar: 'jar', cup: 'cup', box: 'box', pack: 'pack', can: 'can', bottle: 'bottle' };
                 const unitLabel = unitLabelMap[unit] || unit;
-                const isPending = !!product._pending;
                 row.innerHTML = `
                     <td>
                         <div class="product-image" id="${thumbCellId}">📷</div>
                     </td>
                     <td><span class="product-name">${product.name}</span></td>
-                    <td>${product.description}${isPending ? ' <span class="badge-pending">(Pending)</span>' : ''}</td>
+                    <td>${product.description}</td>
                     <td><span class="status-badge ${product.availability === 'In Stock' ? 'status-in-stock' : 'status-out-of-stock'}">${product.availability}</span></td>
                     <td>${product.barcode}</td>
                     <td>${product.category}</td>
                     <td><span class="price">$${product.price.toFixed(2)} / ${unitLabel}</span></td>
                     <td>
-                        <button class="action-btn" onclick="editProduct('${product.id}', ${isPending ? 'true' : 'false'})">Edit</button>
-                        <button class="action-btn delete-btn" onclick="deleteProduct('${product.id}', ${isPending ? 'true' : 'false'})">${isPending ? 'Remove' : 'Delete'}</button>
+                        <button class="action-btn" onclick="editProduct('${product.id}')">Edit</button>
+                        <button class="action-btn delete-btn" onclick="deleteProduct('${product.id}')">Delete</button>
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -356,7 +340,6 @@
         // Open add product modal
         function openAddProductModal() {
             currentEditingId = null;
-            currentEditingIsPending = false;
             document.getElementById('modal-title').textContent = 'Add Product';
             document.getElementById('product-form').reset();
             document.getElementById('product-modal').style.display = 'block';
@@ -369,21 +352,17 @@
         }
 
         // Edit product
-        function editProduct(id, isPending = false) {
-            const source = isPending ? pendingProducts : products;
-            const product = source.find(p => p.id === id);
+        function editProduct(id) {
+            const product = products.find(p => p.id === id);
             if (product) {
                 currentEditingId = id;
-                currentEditingIsPending = !!isPending;
                 document.getElementById('modal-title').textContent = 'Edit Product';
                 document.getElementById('product-name').value = product.name;
                 document.getElementById('product-description').value = product.description;
                 document.getElementById('product-category').value = product.category;
                 document.getElementById('product-price').value = product.price;
                 const unitEl = document.getElementById('product-price-unit');
-                const unitVal = product.priceUnit || 'piece';
-                ensureUnitOption(unitVal);
-                if (unitEl) unitEl.value = unitVal;
+                if (unitEl) unitEl.value = product.priceUnit || 'piece';
                 document.getElementById('product-barcode').value = product.barcode;
                 document.getElementById('product-availability').value = product.availability;
                 document.getElementById('product-modal').style.display = 'block';
@@ -447,39 +426,18 @@
                 if (imageKeys.length > 0) formData.imageKeys = imageKeys;
                 if (currentEditingId && deleteKeys.length > 0) formData.deleteKeys = deleteKeys;
 
-                if (currentEditingIsPending) {
-                    // Update local pending item only (do not hit backend)
-                    const idx = pendingProducts.findIndex(p => p.id === currentEditingId);
-                    if (idx >= 0) {
-                        pendingProducts[idx] = { ...pendingProducts[idx], ...formData };
-                    }
-                    closeModal();
-                    showSuccess('Pending item updated. It will be saved on Publish.');
-                    renderProducts();
-                } else {
-                    await dbService.putProduct(formData);
-                    closeModal();
-                    showSuccess(currentEditingId ? 'Product updated successfully!' : 'Product added successfully!');
-                    loadProducts();
-                }
+                await dbService.putProduct(formData);
+                closeModal();
+                showSuccess(currentEditingId ? 'Product updated successfully!' : 'Product added successfully!');
+                loadProducts();
             } catch (error) {
                 const modalError = document.getElementById('modal-error');
                 modalError.innerHTML = `<div class="error">Failed to save product: ${error.message}</div>`;
             }
         }
 
-        // Delete product (supports pending rows removal)
-        async function deleteProduct(id, isPending = false) {
-            if (isPending) {
-                const before = pendingProducts.length;
-                pendingProducts = pendingProducts.filter(p => p.id !== id);
-                if (pendingProducts.length < before) {
-                    showSuccess('Pending item removed.');
-                    renderProducts();
-                    updatePublishButton();
-                }
-                return;
-            }
+        // Delete product
+        async function deleteProduct(id) {
             if (confirm('Are you sure you want to delete this product?')) {
                 try {
                     await dbService.deleteProduct(id);
@@ -495,82 +453,11 @@
         function closeModal() {
             document.getElementById('product-modal').style.display = 'none';
             document.getElementById('modal-error').innerHTML = '';
-            currentEditingId = null;
-            currentEditingIsPending = false;
         }
 
-        // Publish pending staged items to backend
-        async function publishChanges() {
-            if (!pendingProducts.length) {
-                showSuccess('No pending items to publish.');
-                return;
-            }
-            try {
-                showLoading(true);
-                updatePublishButton();
-                let success = 0, fail = 0;
-                let firstError = '';
-                for (const p of pendingProducts) {
-                    try {
-                        const payload = {
-                            name: p.name,
-                            description: p.description,
-                            category: p.category,
-                            price: Number(p.price),
-                            priceUnit: p.priceUnit || 'piece',
-                            barcode: p.barcode,
-                            availability: p.availability,
-                            imageKeys: []
-                        };
-                        await dbService.putProduct(payload);
-                        success++;
-                    } catch (err) {
-                        const msg = (err && err.message) ? err.message : '';
-                        const isPriceUnitError = msg.includes('(400)') || /price\s*unit|priceunit/i.test(msg);
-                        if (isPriceUnitError) {
-                            try {
-                                // Fallback: create with a safe allowed unit, then update to desired unit
-                                const safePayload = {
-                                    name: p.name,
-                                    description: p.description,
-                                    category: p.category,
-                                    price: Number(p.price),
-                                    priceUnit: 'piece', // safe unit expected to pass backend create validation
-                                    barcode: p.barcode,
-                                    availability: p.availability,
-                                    imageKeys: []
-                                };
-                                const created = await dbService.putProduct(safePayload);
-                                const createdId = (created && (created.id || (created.Item && created.Item.id) || (created.item && created.item.id))) || null;
-                                if (!createdId) throw new Error('Fallback create returned no id');
-                                const updatePayload = { ...safePayload, id: createdId, priceUnit: p.priceUnit || 'piece' };
-                                await dbService.putProduct(updatePayload);
-                                success++;
-                                continue; // next item
-                            } catch (e2) {
-                                const e2msg = (e2 && e2.message) ? e2.message : '';
-                                if (!firstError) firstError = e2msg || msg || 'Unknown error';
-                                fail++;
-                                continue;
-                            }
-                        }
-                        fail++;
-                        if (!firstError) firstError = msg || 'Unknown error';
-                    }
-                }
-                pendingProducts = [];
-                if (fail > 0) {
-                    showError(`Publish completed with errors. Added: ${success}. Failed: ${fail}. Example error: ${firstError}`);
-                } else {
-                    showSuccess(`Publish complete. Added: ${success}. Failed: ${fail}.`);
-                }
-                await loadProducts();
-                updatePublishButton();
-            } catch (e) {
-                showError('Publish failed: ' + e.message);
-            } finally {
-                showLoading(false);
-            }
+        // Publish changes (placeholder function)
+        function publishChanges() {
+            showSuccess('Changes published successfully!');
         }
 
         // Close modal when clicking outside
@@ -675,6 +562,17 @@ async function deleteProduct(id) {
             showError('Failed to delete product: ' + error.message);
         }
     }
+}
+
+// Close modal
+function closeModal() {
+    document.getElementById('product-modal').style.display = 'none';
+    document.getElementById('modal-error').innerHTML = '';
+}
+
+// Publish changes (placeholder function)
+function publishChanges() {
+    showSuccess('Changes published successfully!');
 }
 
 // Close modal when clicking outside
@@ -866,26 +764,29 @@ async function onCsvSelected(e) {
             const sample = dupErrors.slice(0, 5).map(er => `Row ${er.row}: ${er.message}`).join('<br>');
             showError(`Duplicates skipped:<br>${sample}${dupErrors.length>5?'\n...':''}`);
         }
-        // Stage filtered rows locally as pending (no backend writes)
-        const now = Date.now();
-        const staged = filtered.map((p, idx) => ({
-            id: `pending:${now}:${idx}`,
-            _pending: true,
-            name: p.name,
-            description: p.description,
-            availability: p.availability,
-            barcode: p.barcode,
-            category: p.category,
-            price: Number(p.price),
-            priceUnit: p.priceUnit || 'piece',
-            imageKeys: []
-        }));
-        pendingProducts = pendingProducts.concat(staged);
+        let success = 0; let fail = 0;
+        for (let i = 0; i < filtered.length; i++) {
+            const p = filtered[i];
+            try {
+                await dbService.putProduct({
+                    name: p.name,
+                    description: p.description,
+                    availability: p.availability,
+                    barcode: p.barcode,
+                    category: p.category,
+                    price: Number(p.price),
+                    priceUnit: p.priceUnit || 'piece',
+                    imageKeys: []
+                });
+                success++;
+            } catch (err) {
+                fail++;
+            }
+        }
         const invalidCount = errors.length;
         const dupCount = dupErrors.length;
-        showSuccess(`Imported ${staged.length} row(s) as pending. Skipped - invalid: ${invalidCount}, duplicates: ${dupCount}. Use Publish to save.`);
-        renderProducts();
-        updatePublishButton();
+        showSuccess(`Import complete. Added: ${success}. Skipped - invalid: ${invalidCount}, duplicates: ${dupCount}, failed on save: ${fail}.`);
+        if (success > 0) await loadProducts();
     } catch (err) {
         showError('CSV import failed: ' + err.message);
     } finally {
@@ -949,7 +850,7 @@ function parseCsvLine(line) {
 }
 
 function validateCsvRows(rows, headerInfo) {
-    // Accept any unit; normalize common variants (including common typo 'Ib' -> 'lb')
+    const allowedUnits = ['piece','lb','oz','g','kg','gallon','dozen','loaf','bag','bags','carton','block','jar','cup','box','pack','can','bottle'];
     const toImport = [];
     const errors = [];
     for (let i = 0; i < rows.length; i++) {
@@ -978,7 +879,8 @@ function validateCsvRows(rows, headerInfo) {
         if (!bad && !obj.availability) bad = 'availability must be In Stock or Out of Stock';
         if (!bad) {
             const unit = normalizeUnit(String(obj.priceUnit || 'piece'));
-            obj.priceUnit = unit || 'piece';
+            if (!allowedUnits.includes(unit)) bad = 'priceUnit must be one of ' + allowedUnits.join(', ');
+            else obj.priceUnit = unit;
         }
         if (bad) {
             errors.push({ row: i+2, message: bad });
@@ -1059,19 +961,6 @@ function normalizeUnit(val) {
     return map[u] || u;
 }
 
-// Ensure a unit exists in the dropdown; if missing, add it
-function ensureUnitOption(unit) {
-    const sel = document.getElementById('product-price-unit');
-    if (!sel) return;
-    const value = unit || 'piece';
-    if (![...sel.options].some(o => o.value === value)) {
-        const opt = document.createElement('option');
-        opt.value = value;
-        opt.textContent = `per ${value}`;
-        sel.appendChild(opt);
-    }
-}
-
 // Normalize name for duplicate detection
 function normalizeName(name) {
     return (name || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
@@ -1085,8 +974,3 @@ function cleanPrice(val) {
 // Expose CSV handlers for inline HTML attributes
 window.triggerCsvPick = triggerCsvPick;
 window.onCsvSelected = onCsvSelected;
-// Expose UI actions
-window.publishChanges = publishChanges;
-window.editProduct = editProduct;
-window.deleteProduct = deleteProduct;
-window.openAddProductModal = openAddProductModal;
