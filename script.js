@@ -68,14 +68,13 @@
         // Global variables
         let products = [];
         let currentEditingId = null;
+        let currentEditingIsPending = false;
         // Images selected in the modal (frontend-only for now)
         let selectedImages = [null, null]; // { file, url, width, height }
         let carouselIndex = 0;
         // Existing images for currently edited product
         let existingImageKeys = [null, null];
         let deleteKeys = [];
-        // Staged items from CSV (not yet saved to backend)
-        let stagedItems = [];
         // Search state
         let searchTerm = '';
         let filters = {
@@ -83,6 +82,8 @@
         };
         // In-memory cache for signed GET URLs
         const imageUrlCache = new Map(); // key -> url
+        // Pending products staged from CSV (not yet published to backend)
+        let pendingProducts = [];
 
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
@@ -222,11 +223,10 @@
             }
         }
 
-        // Render products in the table
+        // Render products in the table (includes staged pending items)
         function renderProducts() {
             const tbody = document.getElementById('products-tbody');
-            // Merge backend products with staged items for display
-            const combined = [...products, ...stagedItems];
+            const combined = (products || []).concat(pendingProducts || []);
             const filteredProducts = applyFilters(combined);
 
             tbody.innerHTML = '';
@@ -240,22 +240,20 @@
                 const unit = (product.priceUnit || 'piece');
                 const unitLabelMap = { piece: 'piece', lb: 'lb', oz: 'oz', g: 'g', kg: 'kg', gallon: 'gallon', dozen: 'dozen', loaf: 'loaf', bag: 'bag', bags: 'bags', carton: 'carton', block: 'block', jar: 'jar', cup: 'cup', box: 'box', pack: 'pack', can: 'can', bottle: 'bottle' };
                 const unitLabel = unitLabelMap[unit] || unit;
-                const stagedBadge = product._staged ? '<span class="staged-badge">Staged</span>' : '';
+                const isPending = !!product._pending;
                 row.innerHTML = `
                     <td>
                         <div class="product-image" id="${thumbCellId}">📷</div>
                     </td>
-                    <td><span class="product-name">${product.name}</span> ${stagedBadge}</td>
-                    <td>${product.description}</td>
+                    <td><span class="product-name">${product.name}</span></td>
+                    <td>${product.description}${isPending ? ' <span class="badge-pending">(Pending)</span>' : ''}</td>
                     <td><span class="status-badge ${product.availability === 'In Stock' ? 'status-in-stock' : 'status-out-of-stock'}">${product.availability}</span></td>
                     <td>${product.barcode}</td>
                     <td>${product.category}</td>
                     <td><span class="price">$${product.price.toFixed(2)} / ${unitLabel}</span></td>
                     <td>
-                        ${product._staged
-                            ? `<button class="action-btn delete-btn" onclick="removeStaged('${product.id}')">Remove</button>`
-                            : `<button class=\"action-btn\" onclick=\"editProduct('${product.id}')\">Edit</button>
-                               <button class=\"action-btn delete-btn\" onclick=\"deleteProduct('${product.id}')\">Delete</button>`}
+                        <button class="action-btn" onclick="editProduct('${product.id}', ${isPending ? 'true' : 'false'})">Edit</button>
+                        <button class="action-btn delete-btn" onclick="deleteProduct('${product.id}', ${isPending ? 'true' : 'false'})">${isPending ? 'Remove' : 'Delete'}</button>
                     </td>
                 `;
                 tbody.appendChild(row);
@@ -359,17 +357,21 @@
         }
 
         // Edit product
-        function editProduct(id) {
-            const product = products.find(p => p.id === id);
+        function editProduct(id, isPending = false) {
+            const source = isPending ? pendingProducts : products;
+            const product = source.find(p => p.id === id);
             if (product) {
                 currentEditingId = id;
+                currentEditingIsPending = !!isPending;
                 document.getElementById('modal-title').textContent = 'Edit Product';
                 document.getElementById('product-name').value = product.name;
                 document.getElementById('product-description').value = product.description;
                 document.getElementById('product-category').value = product.category;
                 document.getElementById('product-price').value = product.price;
                 const unitEl = document.getElementById('product-price-unit');
-                if (unitEl) unitEl.value = product.priceUnit || 'piece';
+                const unitVal = product.priceUnit || 'piece';
+                ensureUnitOption(unitVal);
+                if (unitEl) unitEl.value = unitVal;
                 document.getElementById('product-barcode').value = product.barcode;
                 document.getElementById('product-availability').value = product.availability;
                 document.getElementById('product-modal').style.display = 'block';
@@ -433,18 +435,38 @@
                 if (imageKeys.length > 0) formData.imageKeys = imageKeys;
                 if (currentEditingId && deleteKeys.length > 0) formData.deleteKeys = deleteKeys;
 
-                await dbService.putProduct(formData);
-                closeModal();
-                showSuccess(currentEditingId ? 'Product updated successfully!' : 'Product added successfully!');
-                loadProducts();
+                if (currentEditingIsPending) {
+                    // Update local pending item only (do not hit backend)
+                    const idx = pendingProducts.findIndex(p => p.id === currentEditingId);
+                    if (idx >= 0) {
+                        pendingProducts[idx] = { ...pendingProducts[idx], ...formData };
+                    }
+                    closeModal();
+                    showSuccess('Pending item updated. It will be saved on Publish.');
+                    renderProducts();
+                } else {
+                    await dbService.putProduct(formData);
+                    closeModal();
+                    showSuccess(currentEditingId ? 'Product updated successfully!' : 'Product added successfully!');
+                    loadProducts();
+                }
             } catch (error) {
                 const modalError = document.getElementById('modal-error');
                 modalError.innerHTML = `<div class="error">Failed to save product: ${error.message}</div>`;
             }
         }
 
-        // Delete product
-        async function deleteProduct(id) {
+        // Delete product (supports pending rows removal)
+        async function deleteProduct(id, isPending = false) {
+            if (isPending) {
+                const before = pendingProducts.length;
+                pendingProducts = pendingProducts.filter(p => p.id !== id);
+                if (pendingProducts.length < before) {
+                    showSuccess('Pending item removed.');
+                    renderProducts();
+                }
+                return;
+            }
             if (confirm('Are you sure you want to delete this product?')) {
                 try {
                     await dbService.deleteProduct(id);
@@ -462,18 +484,18 @@
             document.getElementById('modal-error').innerHTML = '';
         }
 
-        // Publish changes: persist staged items to backend, then reload
+        // Publish pending staged items to backend
         async function publishChanges() {
-            if (!stagedItems.length) {
-                showSuccess('No staged changes to publish.');
+            if (!pendingProducts.length) {
+                showSuccess('No pending items to publish.');
                 return;
             }
             try {
                 showLoading(true);
-                let success = 0; let fail = 0;
-                for (const p of stagedItems) {
+                let success = 0, fail = 0;
+                for (const p of pendingProducts) {
                     try {
-                        await dbService.putProduct({
+                        const payload = {
                             name: p.name,
                             description: p.description,
                             category: p.category,
@@ -481,16 +503,19 @@
                             priceUnit: p.priceUnit || 'piece',
                             barcode: p.barcode,
                             availability: p.availability,
-                            imageKeys: []
-                        });
+                            imageKeys: Array.isArray(p.imageKeys) ? p.imageKeys : []
+                        };
+                        await dbService.putProduct(payload);
                         success++;
-                    } catch (_) { fail++; }
+                    } catch (_) {
+                        fail++;
+                    }
                 }
-                stagedItems = [];
+                pendingProducts = [];
+                showSuccess(`Publish complete. Added: ${success}. Failed: ${fail}.`);
                 await loadProducts();
-                showSuccess(`Published. Added: ${success}. Failed: ${fail}.`);
-            } catch (err) {
-                showError('Publish failed: ' + err.message);
+            } catch (e) {
+                showError('Publish failed: ' + e.message);
             } finally {
                 showLoading(false);
             }
@@ -800,27 +825,24 @@ async function onCsvSelected(e) {
             const sample = dupErrors.slice(0, 5).map(er => `Row ${er.row}: ${er.message}`).join('<br>');
             showError(`Duplicates skipped:<br>${sample}${dupErrors.length>5?'\n...':''}`);
         }
-        // Stage filtered items locally instead of saving to backend
-        const before = stagedItems.length;
-        const makeTempId = i => `staged-${Date.now()}-${i}-${Math.random().toString(36).slice(2,8)}`;
-        filtered.forEach((p, idx) => {
-            stagedItems.push({
-                id: makeTempId(idx),
-                name: p.name,
-                description: p.description,
-                category: p.category,
-                price: Number(p.price),
-                priceUnit: p.priceUnit || 'piece',
-                barcode: p.barcode,
-                availability: p.availability,
-                imageKeys: [],
-                _staged: true
-            });
-        });
-        const added = stagedItems.length - before;
+        // Stage filtered rows locally as pending (no backend writes)
+        const now = Date.now();
+        const staged = filtered.map((p, idx) => ({
+            id: `pending:${now}:${idx}`,
+            _pending: true,
+            name: p.name,
+            description: p.description,
+            availability: p.availability,
+            barcode: p.barcode,
+            category: p.category,
+            price: Number(p.price),
+            priceUnit: p.priceUnit || 'piece',
+            imageKeys: []
+        }));
+        pendingProducts = pendingProducts.concat(staged);
         const invalidCount = errors.length;
         const dupCount = dupErrors.length;
-        showSuccess(`Import staged. Staged: ${added}. Skipped - invalid: ${invalidCount}, duplicates: ${dupCount}. Use Publish to save.`);
+        showSuccess(`Imported ${staged.length} row(s) as pending. Skipped - invalid: ${invalidCount}, duplicates: ${dupCount}. Use Publish to save.`);
         renderProducts();
     } catch (err) {
         showError('CSV import failed: ' + err.message);
@@ -885,7 +907,7 @@ function parseCsvLine(line) {
 }
 
 function validateCsvRows(rows, headerInfo) {
-    const allowedUnits = ['piece','lb','oz','g','kg','gallon','dozen','loaf','bag','bags','carton','block','jar','cup','box','pack','can','bottle'];
+    // Accept any unit; normalize common variants (including common typo 'Ib' -> 'lb')
     const toImport = [];
     const errors = [];
     for (let i = 0; i < rows.length; i++) {
@@ -914,8 +936,7 @@ function validateCsvRows(rows, headerInfo) {
         if (!bad && !obj.availability) bad = 'availability must be In Stock or Out of Stock';
         if (!bad) {
             const unit = normalizeUnit(String(obj.priceUnit || 'piece'));
-            if (!allowedUnits.includes(unit)) bad = 'priceUnit must be one of ' + allowedUnits.join(', ');
-            else obj.priceUnit = unit;
+            obj.priceUnit = unit || 'piece';
         }
         if (bad) {
             errors.push({ row: i+2, message: bad });
@@ -971,20 +992,19 @@ function normalizeAvailability(val) {
 function normalizeUnit(val) {
     let u = (val || '').toString().trim().toLowerCase();
     if (!u) return 'piece';
-    // handle prefixes like "per kg", "per  kg"
     u = u.replace(/^per\s+/, '');
     // remove internal spaces (e.g., "l b" -> "lb")
     u = u.replace(/\s+/g, '');
     const map = {
         pieces: 'piece', pcs: 'piece', piece: 'piece',
-        lbs: 'lb', pound: 'lb', pounds: 'lb', lb: 'lb', ib: 'lb', lbr: 'lb',
+        lbs: 'lb', pound: 'lb', pounds: 'lb', lb: 'lb', ib: 'lb', // handle common typo 'Ib'
         ounces: 'oz', ounce: 'oz', oz: 'oz',
         grams: 'g', gram: 'g', g: 'g',
-        kilograms: 'kg', kilogram: 'kg', kg: 'kg', kgs: 'kg',
+        kilograms: 'kg', kilogram: 'kg', kg: 'kg',
         gallons: 'gallon', gallon: 'gallon',
         dozens: 'dozen', dozen: 'dozen',
         loaves: 'loaf', loaf: 'loaf',
-        bags: 'bags', bag: 'bag', baglb: 'lb', // support patterns like "bag lb"
+        bags: 'bags', bag: 'bag',
         cartons: 'carton', carton: 'carton',
         blocks: 'block', block: 'block',
         jars: 'jar', jar: 'jar',
@@ -995,6 +1015,19 @@ function normalizeUnit(val) {
         bottles: 'bottle', bottle: 'bottle'
     };
     return map[u] || u;
+}
+
+// Ensure a unit exists in the dropdown; if missing, add it
+function ensureUnitOption(unit) {
+    const sel = document.getElementById('product-price-unit');
+    if (!sel) return;
+    const value = unit || 'piece';
+    if (![...sel.options].some(o => o.value === value)) {
+        const opt = document.createElement('option');
+        opt.value = value;
+        opt.textContent = `per ${value}`;
+        sel.appendChild(opt);
+    }
 }
 
 // Normalize name for duplicate detection
@@ -1010,8 +1043,3 @@ function cleanPrice(val) {
 // Expose CSV handlers for inline HTML attributes
 window.triggerCsvPick = triggerCsvPick;
 window.onCsvSelected = onCsvSelected;
-window.publishChanges = publishChanges;
-window.removeStaged = function(id) {
-    stagedItems = stagedItems.filter(p => p.id !== id);
-    renderProducts();
-};
