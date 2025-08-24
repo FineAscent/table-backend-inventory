@@ -678,3 +678,29 @@
             .publish-btn { padding: 6px 10px; font-size: 13px; }
             .auth-btn { padding: 6px 10px; font-size: 12px; }
         }
+
+        /* Import CSV styling */
+        .import-csv-btn {
+            background: #7c3aed; /* violet-600 */
+            border: none;
+        }
+        .import-csv-btn:hover { background: #8b5cf6; }
+        .import-csv-btn:active { background: #6d28d9; }
+
+        .csv-hint {
+            margin: 8px 24px 0 24px;
+            color: #6b7280; /* gray-500 */
+            font-size: 12px;
+        }
+
+        /* Price unit select emphasis */
+        .price-unit-select {
+            background-color: #fff;
+            border-color: #cbd5e1; /* slate-300 */
+            font-weight: 600;
+            height: 38px;
+        }
+        .price-unit-select:focus {
+            border-color: #1677ff;
+            box-shadow: 0 0 0 2px rgba(22,119,255,0.25);
+        }
