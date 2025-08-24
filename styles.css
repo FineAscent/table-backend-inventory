@@ -698,9 +698,5 @@
             background-color: #fff;
             border-color: #cbd5e1; /* slate-300 */
             font-weight: 600;
-            height: 38px;
         }
-        .price-unit-select:focus {
-            border-color: #1677ff;
-            box-shadow: 0 0 0 2px rgba(22,119,255,0.25);
-        }
+        

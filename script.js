@@ -224,9 +224,12 @@
         function renderProducts() {
             const tbody = document.getElementById('products-tbody');
             const filteredProducts = applyFilters(products);
-            
+
             tbody.innerHTML = '';
-            
+            // Update product count badge
+            const countEl = document.getElementById('product-count');
+            if (countEl) countEl.textContent = `(${filteredProducts.length})`;
+
             filteredProducts.forEach(product => {
                 const row = document.createElement('tr');
                 const thumbCellId = `thumb-${product.id}`;
