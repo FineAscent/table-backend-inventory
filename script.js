@@ -111,11 +111,13 @@
                 // no seed data; backend holds truth
             }
 
-            async scanProducts() {
+            async scanProducts(lastKey) {
                 const headers = {};
                 const token = getIdToken();
                 if (token) headers['Authorization'] = `Bearer ${token}`;
-                const resp = await fetch(`${API_BASE_URL}/products`, {
+                const url = new URL(`${API_BASE_URL}/products`);
+                if (lastKey) url.searchParams.set('lastKey', lastKey);
+                const resp = await fetch(url.toString(), {
                     method: 'GET',
                     headers
                 });
@@ -210,8 +212,17 @@
         async function loadProducts() {
             try {
                 showLoading(true);
-                const result = await dbService.scanProducts();
-                products = result.items || result.Items || [];
+                const all = [];
+                let safety = 0;
+                let lastKey = undefined;
+                do {
+                    const result = await dbService.scanProducts(lastKey);
+                    const items = result.items || result.Items || [];
+                    all.push(...items);
+                    lastKey = result.lastKey;
+                    safety++;
+                } while (lastKey && safety < 100);
+                products = all;
                 renderProducts();
             } catch (error) {
                 showError('Failed to load products: ' + error.message);
@@ -271,9 +282,6 @@
         function applyFilters(products) {
             const term = (searchTerm || '').trim().toLowerCase();
             return products.filter(product => {
-                // Availability filter
-                if (filters['out-of-stock'] && product.availability === 'Out of Stock') return false;
-
                 // Text search filter (name or barcode)
                 if (term) {
                     const name = (product.name || '').toLowerCase();

@@ -104,6 +104,19 @@ Resources:
         AllowOrigin: "'*'"
         AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
         AllowHeaders: "'Content-Type,X-Amz-Date,Authorization,authorization,X-Api-Key,X-Amz-Security-Token,x-requested-with'"
+      GatewayResponses:
+        DEFAULT_4XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'https://fineascent.github.io'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Requested-With'"
+              Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        DEFAULT_5XX:
+          ResponseParameters:
+            Headers:
+              Access-Control-Allow-Origin: "'https://fineascent.github.io'"
+              Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Requested-With'"
+              Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
 
   ListProductsFunction:
     Type: AWS::Serverless::Function
