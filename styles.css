@@ -164,6 +164,7 @@
             border-radius: 8px;
             background: white;
             box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            overflow-x: auto; /* allow horizontal scroll if columns overflow */
         }
 
         /* Table Header Actions */
@@ -251,6 +252,7 @@
         table {
             width: 100%;
             border-collapse: collapse;
+            min-width: 980px; /* ensure all columns have room; scroll on narrow screens */
         }
 
         th, td {
@@ -269,6 +271,13 @@
         td {
             font-size: 14px;
             color: #666;
+        }
+
+        /* Compact width for Area column (7th column) */
+        #products-table th:nth-child(7),
+        #products-table td:nth-child(7) {
+            width: 80px;
+            white-space: nowrap;
         }
 
         .product-image {
