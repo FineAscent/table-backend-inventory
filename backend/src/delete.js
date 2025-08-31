@@ -6,11 +6,14 @@ const { TABLE_NAME, BUCKET_NAME } = process.env;
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type,X-Api-Key',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Api-Key',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
 };
 
 exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
   try {
     const id = (event.pathParameters || {}).id;
     if (!id) {

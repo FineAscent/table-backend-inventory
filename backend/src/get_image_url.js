@@ -5,7 +5,7 @@ const { BUCKET_NAME } = process.env;
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type,X-Api-Key',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Api-Key',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
 };
 

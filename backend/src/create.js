@@ -6,7 +6,7 @@ const { TABLE_NAME } = process.env;
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type,X-Api-Key',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Api-Key',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
 };
 
@@ -45,6 +45,9 @@ function validate(body) {
 }
 
 exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
   try {
     const body = JSON.parse(event.body || '{}');
     const err = validate(body);

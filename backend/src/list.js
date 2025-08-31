@@ -5,7 +5,7 @@ const { TABLE_NAME, DEFAULT_PAGE_SIZE } = process.env;
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'Content-Type,X-Api-Key',
+  'Access-Control-Allow-Headers': 'Content-Type,Authorization,X-Api-Key',
   'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS'
 };
 
@@ -24,6 +24,9 @@ function decodeKey(token) {
 }
 
 exports.handler = async (event) => {
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 200, headers, body: '' };
+  }
   try {
     const qs = event.queryStringParameters || {};
     const limit = Math.min(parseInt(qs.limit || DEFAULT_PAGE_SIZE, 10) || 50, 200);
