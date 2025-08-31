@@ -43,6 +43,22 @@ function validate(body) {
   return null;
 }
 
+function normalizeCategory(cat) {
+  const allowed = [
+    'Fruits & Veggies',
+    'Seafood',
+    'Bakery',
+    'Frozen Foods',
+    'Beverages',
+    'Snacks',
+    'Infant Care',
+    'Cereals & Breakfast',
+    'Meat & Poultry'
+  ];
+  if (!cat || typeof cat !== 'string') return 'option';
+  return allowed.includes(cat) ? cat : 'option';
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
@@ -101,7 +117,7 @@ exports.handler = async (event) => {
       ...current.Item,
       name: body.name,
       description: body.description,
-      category: body.category,
+      category: normalizeCategory(body.category),
       price: body.price,
       priceUnit: body.priceUnit || current.Item.priceUnit || 'piece',
       barcode: body.barcode,

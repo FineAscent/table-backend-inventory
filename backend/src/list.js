@@ -23,6 +23,22 @@ function decodeKey(token) {
   }
 }
 
+function normalizeCategory(cat) {
+  const allowed = [
+    'Fruits & Veggies',
+    'Seafood',
+    'Bakery',
+    'Frozen Foods',
+    'Beverages',
+    'Snacks',
+    'Infant Care',
+    'Cereals & Breakfast',
+    'Meat & Poultry'
+  ];
+  if (!cat || typeof cat !== 'string') return 'option';
+  return allowed.includes(cat) ? cat : 'option';
+}
+
 exports.handler = async (event) => {
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };
@@ -57,11 +73,13 @@ exports.handler = async (event) => {
       }).promise();
     }
 
+    // Normalize categories for all returned items so older data maps to 'option' if not allowed
+    const items = (result.Items || []).map(it => ({ ...it, category: normalizeCategory(it.category) }));
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({
-        items: result.Items || [],
+        items,
         lastKey: encodeKey(result.LastEvaluatedKey)
       })
     };
