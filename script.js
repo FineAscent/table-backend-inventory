@@ -143,6 +143,7 @@
                     priceUnit: product.priceUnit || 'piece',
                     barcode: product.barcode,
                     availability: product.availability,
+                    areaLocation: product.areaLocation || 'A1',
                     imageKeys: Array.isArray(product.imageKeys) ? product.imageKeys : [],
                     deleteKeys: Array.isArray(product.deleteKeys) ? product.deleteKeys : undefined
                 });
@@ -256,6 +257,7 @@
                     <td><span class="status-badge ${product.availability === 'In Stock' ? 'status-in-stock' : 'status-out-of-stock'}">${product.availability}</span></td>
                     <td>${product.barcode}</td>
                     <td>${product.category}</td>
+                    <td>${product.areaLocation || 'A1'}</td>
                     <td><span class="price">$${product.price.toFixed(2)} / ${unitLabel}</span></td>
                     <td>
                         <button class="action-btn" onclick="editProduct('${product.id}')">Edit</button>
@@ -353,6 +355,8 @@
             document.getElementById('product-modal').style.display = 'block';
             const unitEl = document.getElementById('product-price-unit');
             if (unitEl) unitEl.value = 'piece';
+            const areaEl = document.getElementById('product-area');
+            if (areaEl) areaEl.value = 'A1';
             // reset images
             resetImages();
             existingImageKeys = [null, null];
@@ -373,6 +377,8 @@
                 if (unitEl) unitEl.value = product.priceUnit || 'piece';
                 document.getElementById('product-barcode').value = product.barcode;
                 document.getElementById('product-availability').value = product.availability;
+                const areaEl = document.getElementById('product-area');
+                if (areaEl) areaEl.value = product.areaLocation || 'A1';
                 document.getElementById('product-modal').style.display = 'block';
                 resetImages();
                 // Load persisted images (up to 2) as existing
@@ -400,7 +406,8 @@
                     price: parseFloat(document.getElementById('product-price').value),
                     priceUnit: (document.getElementById('product-price-unit') && document.getElementById('product-price-unit').value) || 'piece',
                     barcode: document.getElementById('product-barcode').value,
-                    availability: document.getElementById('product-availability').value
+                    availability: document.getElementById('product-availability').value,
+                    areaLocation: (document.getElementById('product-area') && document.getElementById('product-area').value) || 'A1'
                 };
 
                 if (currentEditingId) {
@@ -784,6 +791,7 @@ async function onCsvSelected(e) {
                     category: p.category,
                     price: Number(p.price),
                     priceUnit: p.priceUnit || 'piece',
+                    areaLocation: 'A1',
                     imageKeys: []
                 });
                 success++;

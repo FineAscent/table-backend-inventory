@@ -23,6 +23,10 @@ function validate(body) {
     const allowed = ['piece','lb','oz','g','kg','gallon','dozen','loaf','bag','bags','carton','block','jar','cup','box','pack','can','bottle'];
     if (!allowed.includes(body.priceUnit)) return 'priceUnit must be one of ' + allowed.join(', ');
   }
+  if (body.areaLocation !== undefined) {
+    const areas = ['A1','A2','A3','A4','A5','A6','A7','A8','A9','A10'];
+    if (!areas.includes(body.areaLocation)) return 'areaLocation must be one of ' + areas.join(', ');
+  }
   if (body.imageKeys !== undefined) {
     if (!Array.isArray(body.imageKeys)) return 'imageKeys must be an array of strings';
     if (body.imageKeys.length > 2) return 'imageKeys can contain at most 2 items';
@@ -99,6 +103,7 @@ exports.handler = async (event) => {
       priceUnit: body.priceUnit || current.Item.priceUnit || 'piece',
       barcode: body.barcode,
       availability: body.availability,
+      areaLocation: body.areaLocation || current.Item.areaLocation || 'A1',
       updatedAt: now,
       gsi1_pk: body.availability,
       gsi1_sk: current.Item.createdAt || now,
