@@ -40,6 +40,9 @@ function validate(body) {
       if (typeof s !== 'string') return 'deleteKeys must be an array of strings';
     }
   }
+  if (body.scaleNeed !== undefined && typeof body.scaleNeed !== 'boolean') {
+    return 'scaleNeed must be a boolean';
+  }
   return null;
 }
 
@@ -123,6 +126,7 @@ exports.handler = async (event) => {
       barcode: body.barcode,
       availability: body.availability,
       areaLocation: body.areaLocation || current.Item.areaLocation || 'A1',
+      scaleNeed: (typeof body.scaleNeed === 'boolean') ? body.scaleNeed : (current.Item.scaleNeed === true),
       updatedAt: now,
       gsi1_pk: body.availability,
       gsi1_sk: current.Item.createdAt || now,

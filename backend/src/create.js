@@ -41,6 +41,9 @@ function validate(body) {
       if (typeof s !== 'string') return 'imageKeys must be an array of strings';
     }
   }
+  if (body.scaleNeed !== undefined && typeof body.scaleNeed !== 'boolean') {
+    return 'scaleNeed must be a boolean';
+  }
   return null;
 }
 
@@ -93,6 +96,7 @@ exports.handler = async (event) => {
       barcode: body.barcode,
       availability: body.availability,
       areaLocation: body.areaLocation || 'A1',
+      scaleNeed: body.scaleNeed === true ? true : false,
       createdAt: now,
       updatedAt: now,
       gsi1_pk: body.availability,

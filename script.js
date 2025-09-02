@@ -144,6 +144,7 @@
                     barcode: product.barcode,
                     availability: product.availability,
                     areaLocation: product.areaLocation || 'A1',
+                    scaleNeed: product.scaleNeed === true,
                     imageKeys: Array.isArray(product.imageKeys) ? product.imageKeys : [],
                     deleteKeys: Array.isArray(product.deleteKeys) ? product.deleteKeys : undefined
                 });
@@ -357,6 +358,8 @@
             if (unitEl) unitEl.value = 'piece';
             const areaEl = document.getElementById('product-area');
             if (areaEl) areaEl.value = 'A1';
+            const scaleEl = document.getElementById('product-scale-need');
+            if (scaleEl) scaleEl.checked = false;
             // reset images
             resetImages();
             existingImageKeys = [null, null];
@@ -379,6 +382,8 @@
                 document.getElementById('product-availability').value = product.availability;
                 const areaEl = document.getElementById('product-area');
                 if (areaEl) areaEl.value = product.areaLocation || 'A1';
+                const scaleEl = document.getElementById('product-scale-need');
+                if (scaleEl) scaleEl.checked = product.scaleNeed === true;
                 document.getElementById('product-modal').style.display = 'block';
                 resetImages();
                 // Load persisted images (up to 2) as existing
@@ -407,7 +412,8 @@
                     priceUnit: (document.getElementById('product-price-unit') && document.getElementById('product-price-unit').value) || 'piece',
                     barcode: document.getElementById('product-barcode').value,
                     availability: document.getElementById('product-availability').value,
-                    areaLocation: (document.getElementById('product-area') && document.getElementById('product-area').value) || 'A1'
+                    areaLocation: (document.getElementById('product-area') && document.getElementById('product-area').value) || 'A1',
+                    scaleNeed: (document.getElementById('product-scale-need') && document.getElementById('product-scale-need').checked) === true
                 };
 
                 if (currentEditingId) {
