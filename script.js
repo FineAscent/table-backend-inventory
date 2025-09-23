@@ -34,21 +34,52 @@
             return getPixabayApiKey();
         }
 
-        async function searchPixabayImage(query) {
+        function buildTokens(name, category, description) {
+            const text = [name, category, description].filter(Boolean).join(' ').toLowerCase();
+            const stop = new Set(['the','a','an','of','and','or','with','for','on','in','by','pack','pcs','piece','pieces']);
+            return Array.from(new Set(text
+                .replace(/[^a-z0-9\s]/g,' ')
+                .split(/\s+/)
+                .filter(w => w && !stop.has(w) && w.length >= 3)));
+        }
+
+        async function searchPixabayImage(query, { tokens = [], negative = [] } = {}) {
             const key = getPixabayApiKey();
             if (!key) return null;
             try {
                 const q = encodeURIComponent(query);
-                const url = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo&category=food&per_page=5&orientation=horizontal&safesearch=true&colors=white&order=popular`;
+                const url = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo&category=food&per_page=15&orientation=horizontal&safesearch=true&colors=white&order=popular`;
                 const resp = await fetch(url);
                 if (!resp.ok) return null;
                 const data = await resp.json();
                 const hits = (data && data.hits) || [];
                 if (!hits.length) return null;
-                // Prefer images with large resolution and white-dominant
-                hits.sort((a,b) => (b.likes||0) - (a.likes||0));
-                const pick = hits.find(h => (h.imageWidth||0) >= 800 && (h.tags||'').toLowerCase().includes('isolated')) || hits[0];
-                return pick && (pick.largeImageURL || pick.webformatURL) || null;
+                const tset = new Set(tokens.map(t=>t.toLowerCase()));
+                const nset = new Set((negative||[]).map(t=>t.toLowerCase()));
+                const scored = hits.map(h => {
+                    const tags = (h.tags||'').toLowerCase();
+                    let score = 0;
+                    // prefer white/isolated keywords
+                    if (tags.includes('isolated')) score += 3;
+                    if (tags.includes('white')) score += 2;
+                    // token matches
+                    for (const t of tset) if (t && tags.includes(t)) score += 4;
+                    // size preference
+                    score += Math.min(4, Math.floor(((h.imageWidth||0)+(h.imageHeight||0))/1000));
+                    // likes as tie-breaker
+                    score += Math.min(5, (h.likes||0) / 50);
+                    // penalize negatives
+                    for (const n of nset) if (n && tags.includes(n)) score -= 5;
+                    // penalize if already used
+                    const url = h.largeImageURL || h.webformatURL || '';
+                    if (assignedImageUrlsSession.has(url)) score -= 10;
+                    return { h, score };
+                })
+                .filter(x => x.score > -1) // drop very poor matches
+                .sort((a,b)=>b.score - a.score);
+                const pick = scored.length ? scored[0].h : hits[0];
+                const chosen = pick && (pick.largeImageURL || pick.webformatURL) || null;
+                return chosen;
             } catch (_) { return null; }
         }
 
@@ -87,11 +118,15 @@
             } catch (_) { return null; }
         }
 
-        async function searchGroceryImage(name, category) {
+        async function searchGroceryImage(name, category, description) {
+            // Build tokens and negatives; keep 'rice' out unless it is part of tokens
+            const tokens = buildTokens(name, category, description);
+            const negatives = [];
+            if (!tokens.includes('rice')) negatives.push('rice');
             // Craft a white background focused query
             const queryBase = [name, category, 'isolated on white background', 'product', 'grocery'].filter(Boolean).join(' ');
             // Try Pixabay first (best licensing for this use case)
-            let url = await searchPixabayImage(queryBase);
+            let url = await searchPixabayImage(queryBase, { tokens, negative: negatives });
             if (url) return url;
             // Then Unsplash (requires access key)
             url = await searchUnsplashImage(queryBase);
@@ -138,13 +173,15 @@
                     showError('Pixabay API key is required to auto-assign images. You can also set an Unsplash key in localStorage under "unsplash_access_key".');
                     return;
                 }
+                assignedImageUrlsSession = new Set();
                 for (const p of products) {
                     const existingKeys = Array.isArray(p.imageKeys) ? p.imageKeys : (p.image_keys || []);
                     if (existingKeys && existingKeys.length > 0) { skipped++; continue; }
-                    const imgUrl = await searchGroceryImage(p.name, p.category);
+                    const imgUrl = await searchGroceryImage(p.name, p.category, p.description);
                     if (!imgUrl) { skipped++; continue; }
                     const key = await fetchAndUploadImage(imgUrl, p, p.name);
                     if (!key) { skipped++; continue; }
+                    assignedImageUrlsSession.add(imgUrl);
                     try {
                         await dbService.putProduct({
                             id: p.id,
@@ -420,6 +457,9 @@
         }
 
         const dbService = new DynamoDBService();
+
+        // Track used image URLs in current auto-assign session to avoid repeats
+        let assignedImageUrlsSession = new Set();
 
         // Load products from backend API
         async function loadProducts() {
