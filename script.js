@@ -135,18 +135,76 @@
             return await searchWikipediaImage([name, category].filter(Boolean).join(' '));
         }
 
+        // Render an image blob into a 760x600 white background canvas (contain fit) and export as JPEG
+        async function renderToFixedCanvasJpeg(blob, targetW = 760, targetH = 600, quality = 0.9) {
+            // Create bitmap or HTMLImageElement
+            let bitmap = null;
+            try {
+                if ('createImageBitmap' in window) {
+                    bitmap = await createImageBitmap(blob);
+                }
+            } catch (_) { bitmap = null; }
+            if (!bitmap) {
+                const url = URL.createObjectURL(blob);
+                try {
+                    const img = await new Promise((resolve, reject) => {
+                        const el = new Image();
+                        el.crossOrigin = 'anonymous';
+                        el.onload = () => resolve(el);
+                        el.onerror = reject;
+                        el.src = url;
+                    });
+                    // Draw using HTMLImageElement
+                    const canvas = document.createElement('canvas');
+                    canvas.width = targetW; canvas.height = targetH;
+                    const ctx = canvas.getContext('2d');
+                    // Fill white background
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, targetW, targetH);
+                    const iw = img.naturalWidth || img.width; const ih = img.naturalHeight || img.height;
+                    const scale = Math.min(targetW / iw, targetH / ih);
+                    const dw = Math.floor(iw * scale); const dh = Math.floor(ih * scale);
+                    const dx = Math.floor((targetW - dw) / 2); const dy = Math.floor((targetH - dh) / 2);
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(img, dx, dy, dw, dh);
+                    const out = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+                    return out;
+                } finally {
+                    URL.revokeObjectURL(url);
+                }
+            } else {
+                // Draw using ImageBitmap
+                const canvas = document.createElement('canvas');
+                canvas.width = targetW; canvas.height = targetH;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, targetW, targetH);
+                const iw = bitmap.width; const ih = bitmap.height;
+                const scale = Math.min(targetW / iw, targetH / ih);
+                const dw = Math.floor(iw * scale); const dh = Math.floor(ih * scale);
+                const dx = Math.floor((targetW - dw) / 2); const dy = Math.floor((targetH - dh) / 2);
+                ctx.imageSmoothingQuality = 'high';
+                ctx.drawImage(bitmap, dx, dy, dw, dh);
+                const out = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+                try { bitmap.close && bitmap.close(); } catch (_) {}
+                return out;
+            }
+        }
+
         async function fetchAndUploadImage(imageUrl, product, attemptName) {
             try {
                 const resp = await fetch(imageUrl, { mode: 'cors' });
                 if (!resp.ok) throw new Error(`image fetch ${resp.status}`);
-                const contentType = resp.headers.get('content-type') || 'image/jpeg';
-                const blob = await resp.blob();
-                // Create a pseudo File-like object for naming
-                const ext = contentType.includes('png') ? 'png' : (contentType.includes('webp') ? 'webp' : (contentType.includes('gif') ? 'gif' : 'jpg'));
+                const originalBlob = await resp.blob();
+                // Normalize to 760x600 JPEG on white background
+                const processed = await renderToFixedCanvasJpeg(originalBlob, 760, 600, 0.9);
+                if (!processed) throw new Error('failed to process image');
+                const contentType = 'image/jpeg';
+                // File naming
                 const safeBase = (attemptName || product.name || 'image').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
-                const fileName = `${safeBase}-${Date.now()}.${ext}`;
+                const fileName = `${safeBase}-${Date.now()}.jpg`;
                 const { uploadUrl, key } = await dbService.getUploadUrl({ fileName, contentType, productId: product.id });
-                const putResp = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: blob });
+                const putResp = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: processed });
                 if (!putResp.ok) {
                     const t = await putResp.text();
                     throw new Error(`upload failed ${putResp.status}: ${t}`);
