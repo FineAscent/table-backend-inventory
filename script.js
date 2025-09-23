@@ -761,13 +761,19 @@
 
             async getImageUrl(key) {
                 if (imageUrlCache.has(key)) return { url: imageUrlCache.get(key) };
+                const headers = { 'Content-Type': 'application/json' };
+                const token = getIdToken();
+                if (token) headers['Authorization'] = `Bearer ${token}`;
                 const resp = await fetch(`${API_BASE_URL}/image-url`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers,
                     body: JSON.stringify({ key })
                 });
                 if (!resp.ok) {
                     const t = await resp.text();
+                    if (resp.status === 401) {
+                        throw new Error('Unauthorized while fetching image URL. Please login again.');
+                    }
                     throw new Error(`Image URL failed (${resp.status}): ${t}`);
                 }
                 const json = await resp.json();
