@@ -11,6 +11,22 @@
             return window.localStorage.getItem('id_token') || '';
         }
 
+        async function pickSuggestedImageMain(imgUrl) {
+            // Place into slot 0. If slot 0 was occupied and slot 1 is empty, shift old main to slot 1; otherwise mark old for deletion
+            const prevMain = selectedImages[0];
+            await pickSuggestedImage(0, imgUrl);
+            if (prevMain && prevMain.existing && prevMain.key) {
+                // try to keep previous main in slot 1 if empty; else delete
+                if (!selectedImages[1]) {
+                    selectedImages[1] = prevMain;
+                    updateCarouselUI();
+                } else {
+                    deleteKeys = deleteKeys || [];
+                    if (!deleteKeys.includes(prevMain.key)) deleteKeys.push(prevMain.key);
+                }
+            }
+        }
+
         // ===== Suggested images (multiple candidates) =====
         async function searchPixabayImages(query, { tokens = [], negative = [] } = {}, limit = 12) {
             const key = getPixabayApiKey();
@@ -111,6 +127,7 @@
                     <div style="display:flex; flex-direction:column; gap:6px; border:1px solid #eee; padding:8px; border-radius:8px; background:#fff;">
                         <img src="${u}" alt="suggested" style="width:100%; height:100px; object-fit:contain; background:#fff; border:1px solid #f0f0f0;"/>
                         <div style="display:flex; gap:6px;">
+                            <button type="button" class="action-btn" onclick="pickSuggestedImageMain('${u.replace(/'/g, "\'")}')">Use as Main</button>
                             <button type="button" class="action-btn" onclick="pickSuggestedImage(0, '${u.replace(/'/g, "\'")}')">Use as 1</button>
                             <button type="button" class="action-btn" onclick="pickSuggestedImage(1, '${u.replace(/'/g, "\'")}')">Use as 2</button>
                         </div>
@@ -130,6 +147,12 @@
                 if (!processed) throw new Error('process failed');
                 const file = new File([processed], `${name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60)||'image'}-${Date.now()}.jpg`, { type: 'image/jpeg' });
                 const url = URL.createObjectURL(processed);
+                // If replacing an existing persisted image, mark it for deletion
+                const prev = selectedImages[slot];
+                if (prev && prev.existing && prev.key) {
+                    deleteKeys = deleteKeys || [];
+                    if (!deleteKeys.includes(prev.key)) deleteKeys.push(prev.key);
+                }
                 selectedImages[slot] = { file, url, width: 760, height: 600 };
                 const firstIdx = selectedImages.findIndex(x => !!x);
                 carouselIndex = firstIdx >= 0 ? firstIdx : slot;
@@ -879,8 +902,7 @@
                     formData.id = currentEditingId;
                 }
 
-                // Upload new images to S3 if selected
-                const imageKeys = [];
+                // Upload new images to S3 per slot and track uploadedKey on selectedImages entries
                 for (let i = 0; i < selectedImages.length; i++) {
                     const sel = selectedImages[i];
                     if (!sel || !sel.file) continue; // only new files get uploaded
@@ -900,13 +922,29 @@
                         const t = await putResp.text();
                         throw new Error(`Image upload failed (${putResp.status}): ${t}`);
                     }
-                    imageKeys.push(key);
+                    selectedImages[i].uploadedKey = key;
                 }
 
-                if (imageKeys.length > 0) formData.imageKeys = imageKeys;
+                // Build final imageKeys list in slot order (0..1), using existing keys for kept images and uploadedKey for new ones
+                const finalKeys = [];
+                for (let i = 0; i < selectedImages.length; i++) {
+                    const sel = selectedImages[i];
+                    if (!sel) continue;
+                    if (sel.existing && sel.key) finalKeys.push(sel.key);
+                    else if (sel.uploadedKey) finalKeys.push(sel.uploadedKey);
+                }
+
+                // Always send imageKeys (even if empty) so backend can clear images if needed
+                formData.imageKeys = finalKeys;
                 if (currentEditingId && deleteKeys.length > 0) formData.deleteKeys = deleteKeys;
 
                 await dbService.putProduct(formData);
+                // Clear cached signed URLs for deleted keys to prevent stale thumbnails
+                if (Array.isArray(deleteKeys)) {
+                    for (const k of deleteKeys) {
+                        try { imageUrlCache.delete(k); } catch (_) {}
+                    }
+                }
                 closeModal();
                 showSuccess(currentEditingId ? 'Product updated successfully!' : 'Product added successfully!');
                 loadProducts();
