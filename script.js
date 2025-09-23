@@ -11,6 +11,97 @@
             return window.localStorage.getItem('id_token') || '';
         }
 
+        // =====================
+        // Auto-assign images via free API (Wikipedia thumbnails)
+        // =====================
+        async function searchWikipediaImage(query) {
+            try {
+                const q = encodeURIComponent(query);
+                // Use Wikipedia API to search and get pageimages thumbnails
+                const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${q}&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=800&format=json&origin=*`;
+                const resp = await fetch(url);
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                if (!data || !data.query || !data.query.pages) return null;
+                const pages = Object.values(data.query.pages);
+                if (!pages.length) return null;
+                const page = pages[0];
+                const thumb = page && page.thumbnail && page.thumbnail.source;
+                return thumb || null;
+            } catch (_) { return null; }
+        }
+
+        async function fetchAndUploadImage(imageUrl, product, attemptName) {
+            try {
+                const resp = await fetch(imageUrl, { mode: 'cors' });
+                if (!resp.ok) throw new Error(`image fetch ${resp.status}`);
+                const contentType = resp.headers.get('content-type') || 'image/jpeg';
+                const blob = await resp.blob();
+                // Create a pseudo File-like object for naming
+                const ext = contentType.includes('png') ? 'png' : (contentType.includes('webp') ? 'webp' : (contentType.includes('gif') ? 'gif' : 'jpg'));
+                const safeBase = (attemptName || product.name || 'image').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
+                const fileName = `${safeBase}-${Date.now()}.${ext}`;
+                const { uploadUrl, key } = await dbService.getUploadUrl({ fileName, contentType, productId: product.id });
+                const putResp = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: blob });
+                if (!putResp.ok) {
+                    const t = await putResp.text();
+                    throw new Error(`upload failed ${putResp.status}: ${t}`);
+                }
+                return key;
+            } catch (e) {
+                console.warn('fetchAndUploadImage failed', e);
+                return null;
+            }
+        }
+
+        async function autoAssignImagesForAll() {
+            try {
+                showLoading(true);
+                let updated = 0;
+                let skipped = 0;
+                // Refresh products to ensure latest
+                if (!products || !products.length) {
+                    await loadProducts();
+                }
+                for (const p of products) {
+                    const existingKeys = Array.isArray(p.imageKeys) ? p.imageKeys : (p.image_keys || []);
+                    if (existingKeys && existingKeys.length > 0) { skipped++; continue; }
+                    const nameQuery = [p.name, p.category].filter(Boolean).join(' ');
+                    const imgUrl = await searchWikipediaImage(nameQuery);
+                    if (!imgUrl) { skipped++; continue; }
+                    const key = await fetchAndUploadImage(imgUrl, p, p.name);
+                    if (!key) { skipped++; continue; }
+                    try {
+                        await dbService.putProduct({
+                            id: p.id,
+                            name: p.name,
+                            description: p.description,
+                            category: p.category,
+                            price: Number(p.price),
+                            priceUnit: p.priceUnit || 'piece',
+                            barcode: p.barcode,
+                            availability: p.availability,
+                            areaLocation: p.areaLocation || 'A1',
+                            scaleNeed: p.scaleNeed === true,
+                            imageKeys: [key]
+                        });
+                        updated++;
+                    } catch (err) {
+                        console.warn('putProduct failed', err);
+                    }
+                }
+                await loadProducts();
+                showSuccess(`Auto-assign complete. Updated: ${updated}. Skipped: ${skipped}.`);
+            } catch (err) {
+                showError('Auto-assign images failed: ' + (err && err.message ? err.message : err));
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Expose to window for button click
+        window.autoAssignImagesForAll = autoAssignImagesForAll;
+
         function setIdToken(token) {
             if (token) window.localStorage.setItem('id_token', token);
         }

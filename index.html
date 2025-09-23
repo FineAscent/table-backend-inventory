@@ -41,6 +41,7 @@
                     <div class="header-actions">
                         <input type="file" id="csv-input" accept=".csv" hidden onchange="onCsvSelected(event)">
                         <button class="add-product-btn import-csv-btn" onclick="triggerCsvPick()">Import CSV</button>
+                        <button class="add-product-btn" onclick="autoAssignImagesForAll()" title="Find free images for items without images">Auto Assign Images</button>
                         <button class="add-product-btn" onclick="openAddProductModal()">Add Product</button>
                     </div>
                 </div>
