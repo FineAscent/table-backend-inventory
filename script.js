@@ -852,16 +852,59 @@
 
                 // Render thumbnail if available
                 const keys = product.imageKeys || product.image_keys || [];
+                const cell = document.getElementById(thumbCellId);
+                if (cell) cell.innerHTML = '📷';
                 if (Array.isArray(keys) && keys.length > 0) {
                     const firstKey = keys[0];
-                    dbService.getImageUrl(firstKey).then(({ url }) => {
-                        const cell = document.getElementById(thumbCellId);
-                        if (cell && url) {
-                            cell.innerHTML = `<img src="${url}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;"/>`;
-                        }
-                    }).catch(() => {/* ignore */});
+                    const isDirectUrl = typeof firstKey === 'string' && /^https?:\/\//i.test(firstKey);
+                    const setImg = (src) => {
+                        const c = document.getElementById(thumbCellId);
+                        if (!c) return;
+                        if (!src) { c.textContent = '📷'; return; }
+                        c.innerHTML = `<img id="${thumbCellId}-img" src="${src}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;" onerror="window.refreshThumb && window.refreshThumb('${firstKey}','${thumbCellId}')"/>`;
+                    };
+                    if (isDirectUrl) {
+                        setImg(firstKey);
+                    } else {
+                        dbService.getImageUrl(firstKey).then(({ url }) => {
+                            setImg(url);
+                        }).catch((e) => {
+                            console.warn('getImageUrl failed for key', firstKey, e);
+                            setImg(null);
+                        });
+                    }
                 }
             });
+        }
+
+        // Attempt to refresh a thumbnail when a signed URL has expired (403). Will try once.
+        window.refreshThumb = async function(key, cellId) {
+            try {
+                const cell = document.getElementById(cellId);
+                const img = document.getElementById(cellId + '-img');
+                if (!cell) return;
+                // Prevent infinite loops: if we've already retried, bail out
+                if (img && img.dataset && img.dataset.retried === '1') {
+                    cell.textContent = '📷';
+                    return;
+                }
+                // Fetch a fresh signed URL (bypass cache by temporarily clearing)
+                try { imageUrlCache.delete && imageUrlCache.delete(key); } catch(_){}
+                const { url } = await dbService.getImageUrl(key);
+                if (!url) { cell.textContent = '📷'; return; }
+                // Append a cache buster
+                const finalUrl = url + (url.includes('?') ? '&' : '?') + 'r=' + Date.now();
+                if (img) {
+                    img.dataset.retried = '1';
+                    img.src = finalUrl;
+                    img.onerror = function() { this.onerror = null; this.parentElement.textContent = '📷'; };
+                } else {
+                    cell.innerHTML = `<img id="${cellId}-img" src="${finalUrl}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;" onerror="this.onerror=null;this.parentElement.textContent='📷';"/>`;
+                }
+            } catch (e) {
+                const cell = document.getElementById(cellId);
+                if (cell) cell.textContent = '📷';
+            }
         }
 
         // Apply filters to products
