@@ -12,12 +12,68 @@
         }
 
         // =====================
-        // Auto-assign images via free API (Wikipedia thumbnails)
+        // Auto-assign images via free APIs (Pixabay primary, Unsplash fallback, Wikipedia last-resort)
+        // Target: grocery items on white background
         // =====================
+        function getPixabayApiKey() {
+            return window.localStorage.getItem('pixabay_api_key') || '';
+        }
+
+        function setPixabayApiKey(key) {
+            if (key) window.localStorage.setItem('pixabay_api_key', key.trim());
+        }
+
+        async function ensurePixabayKeyOrPrompt() {
+            let key = getPixabayApiKey();
+            if (!key) {
+                key = window.prompt('Enter your Pixabay API key to auto-assign product images:', '');
+                if (key && key.trim()) {
+                    setPixabayApiKey(key.trim());
+                }
+            }
+            return getPixabayApiKey();
+        }
+
+        async function searchPixabayImage(query) {
+            const key = getPixabayApiKey();
+            if (!key) return null;
+            try {
+                const q = encodeURIComponent(query);
+                const url = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo&category=food&per_page=5&orientation=horizontal&safesearch=true&colors=white&order=popular`;
+                const resp = await fetch(url);
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                const hits = (data && data.hits) || [];
+                if (!hits.length) return null;
+                // Prefer images with large resolution and white-dominant
+                hits.sort((a,b) => (b.likes||0) - (a.likes||0));
+                const pick = hits.find(h => (h.imageWidth||0) >= 800 && (h.tags||'').toLowerCase().includes('isolated')) || hits[0];
+                return pick && (pick.largeImageURL || pick.webformatURL) || null;
+            } catch (_) { return null; }
+        }
+
+        async function searchUnsplashImage(query) {
+            // Optional: use client_id if configured via localStorage to improve quota; otherwise rely on public hotlinking which may be rate limited/blocked
+            const clientId = window.localStorage.getItem('unsplash_access_key') || '';
+            if (!clientId) return null;
+            try {
+                const q = encodeURIComponent(query);
+                const url = `https://api.unsplash.com/search/photos?query=${q}&per_page=5&content_filter=high&orientation=landscape&client_id=${encodeURIComponent(clientId)}`;
+                const resp = await fetch(url);
+                if (!resp.ok) return null;
+                const data = await resp.json();
+                const results = (data && data.results) || [];
+                if (!results.length) return null;
+                // Prefer results with white backgrounds by checking tags/alt_description
+                let pick = results.find(r => (r.alt_description||'').toLowerCase().includes('white background')) || results[0];
+                // Use full or regular URLs
+                return (pick && (pick.urls && (pick.urls.full || pick.urls.regular))) || null;
+            } catch (_) { return null; }
+        }
+
         async function searchWikipediaImage(query) {
             try {
                 const q = encodeURIComponent(query);
-                // Use Wikipedia API to search and get pageimages thumbnails
                 const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${q}&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=800&format=json&origin=*`;
                 const resp = await fetch(url);
                 if (!resp.ok) return null;
@@ -29,6 +85,19 @@
                 const thumb = page && page.thumbnail && page.thumbnail.source;
                 return thumb || null;
             } catch (_) { return null; }
+        }
+
+        async function searchGroceryImage(name, category) {
+            // Craft a white background focused query
+            const queryBase = [name, category, 'isolated on white background', 'product', 'grocery'].filter(Boolean).join(' ');
+            // Try Pixabay first (best licensing for this use case)
+            let url = await searchPixabayImage(queryBase);
+            if (url) return url;
+            // Then Unsplash (requires access key)
+            url = await searchUnsplashImage(queryBase);
+            if (url) return url;
+            // Fall back to Wikipedia if nothing else
+            return await searchWikipediaImage([name, category].filter(Boolean).join(' '));
         }
 
         async function fetchAndUploadImage(imageUrl, product, attemptName) {
@@ -63,11 +132,16 @@
                 if (!products || !products.length) {
                     await loadProducts();
                 }
+                // Ensure Pixabay key configured (prompt once)
+                const key = await ensurePixabayKeyOrPrompt();
+                if (!key) {
+                    showError('Pixabay API key is required to auto-assign images. You can also set an Unsplash key in localStorage under "unsplash_access_key".');
+                    return;
+                }
                 for (const p of products) {
                     const existingKeys = Array.isArray(p.imageKeys) ? p.imageKeys : (p.image_keys || []);
                     if (existingKeys && existingKeys.length > 0) { skipped++; continue; }
-                    const nameQuery = [p.name, p.category].filter(Boolean).join(' ');
-                    const imgUrl = await searchWikipediaImage(nameQuery);
+                    const imgUrl = await searchGroceryImage(p.name, p.category);
                     if (!imgUrl) { skipped++; continue; }
                     const key = await fetchAndUploadImage(imgUrl, p, p.name);
                     if (!key) { skipped++; continue; }
@@ -101,6 +175,52 @@
 
         // Expose to window for button click
         window.autoAssignImagesForAll = autoAssignImagesForAll;
+
+        // =====================
+        // Bulk remove all images
+        // =====================
+        async function removeAllImages() {
+            if (!confirm('Remove all images from all products? This cannot be undone.')) return;
+            try {
+                showLoading(true);
+                // Ensure we have latest list
+                if (!products || !products.length) {
+                    await loadProducts();
+                }
+                let changed = 0; let skipped = 0;
+                for (const p of products) {
+                    const existingKeys = Array.isArray(p.imageKeys) ? p.imageKeys : (p.image_keys || []);
+                    if (!existingKeys || existingKeys.length === 0) { skipped++; continue; }
+                    try {
+                        await dbService.putProduct({
+                            id: p.id,
+                            name: p.name,
+                            description: p.description,
+                            category: p.category,
+                            price: Number(p.price),
+                            priceUnit: p.priceUnit || 'piece',
+                            barcode: p.barcode,
+                            availability: p.availability,
+                            areaLocation: p.areaLocation || 'A1',
+                            scaleNeed: p.scaleNeed === true,
+                            imageKeys: [],
+                            deleteKeys: existingKeys
+                        });
+                        changed++;
+                    } catch (err) {
+                        console.warn('removeAllImages: putProduct failed for', p.id, err);
+                    }
+                }
+                await loadProducts();
+                showSuccess(`Remove images complete. Updated: ${changed}. Skipped (no images): ${skipped}.`);
+            } catch (err) {
+                showError('Remove all images failed: ' + (err && err.message ? err.message : err));
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        window.removeAllImages = removeAllImages;
 
         function setIdToken(token) {
             if (token) window.localStorage.setItem('id_token', token);
