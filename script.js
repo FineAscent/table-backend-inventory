@@ -28,12 +28,13 @@
         }
 
         // ===== Suggested images (multiple candidates) =====
-        async function searchPixabayImages(query, { tokens = [], negative = [] } = {}, limit = 12) {
+        async function searchPixabayImages(query, { tokens = [], negative = [], useWhiteFilter = true, includeCategory = true } = {}, limit = 12) {
             const key = getPixabayApiKey();
             if (!key) return [];
             try {
                 const q = encodeURIComponent(query);
-                const url = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo&category=food&per_page=${Math.min(50, Math.max(5, limit*2))}&orientation=horizontal&safesearch=true&colors=white&order=popular`;
+                const base = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo${includeCategory?`&category=food`:''}&per_page=${Math.min(50, Math.max(5, limit*2))}&orientation=horizontal&safesearch=true&order=popular`;
+                const url = useWhiteFilter ? `${base}&colors=white` : base;
                 const resp = await fetch(url);
                 if (!resp.ok) return [];
                 const data = await resp.json();
@@ -99,19 +100,64 @@
                 // Clear previous and show loading state
                 const container = document.getElementById('suggested-images');
                 if (container) container.innerHTML = '<div style="color:#666;">Loading suggestions…</div>';
-                // Ensure Pixabay key (prompt once)
-                await ensurePixabayKeyOrPrompt();
+                // Ensure keys
+                const hasPixabay = !!(await ensurePixabayKeyOrPrompt());
+                const unsplashKey = window.localStorage.getItem('unsplash_access_key') || '';
                 const tokens = buildTokens(name, category, description);
                 const negatives = [];
                 if (!tokens.includes('rice')) negatives.push('rice');
-                const queryBase = [name, category, 'isolated on white background', 'product', 'grocery'].filter(Boolean).join(' ');
-                const pix = await searchPixabayImages(queryBase, { tokens, negative: negatives }, 12);
-                const uns = await searchUnsplashImages(queryBase, 8);
-                const wiki = []; // skip multi from wikipedia for now
-                const urls = Array.from(new Set([ ...pix, ...uns, ...wiki ]));
-                renderSuggestedImages(urls);
+                const variants = buildQueryVariants(name, category, description);
+                let urls = [];
+                if (hasPixabay) {
+                    for (const v of variants) {
+                        urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: true, includeCategory: true }, 12);
+                        if (urls.length) break;
+                    }
+                    if (urls.length === 0) {
+                        for (const v of variants) {
+                            urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: false, includeCategory: true }, 12);
+                            if (urls.length) break;
+                        }
+                    }
+                    if (urls.length === 0) {
+                        // Try again without category=food (Pixabay sometimes mislabels)
+                        for (const v of variants) {
+                            urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: true, includeCategory: false }, 12);
+                            if (urls.length) break;
+                        }
+                        if (urls.length === 0) {
+                            for (const v of variants) {
+                                urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: false, includeCategory: false }, 12);
+                                if (urls.length) break;
+                            }
+                        }
+                    }
+                }
+                if (urls.length === 0 && unsplashKey) {
+                    for (const v of variants) {
+                        urls = await searchUnsplashImages(v, 12);
+                        if (urls.length) break;
+                    }
+                }
+                // We skip Wikipedia for multi-suggestions to avoid mixed licenses
+                urls = Array.from(new Set(urls));
+                if (!urls.length && !hasPixabay && !unsplashKey) {
+                    renderSuggestedImages([]);
+                    showError('No image providers configured. Set a Pixabay key (recommended) or Unsplash access key in localStorage.');
+                } else {
+                    renderSuggestedImages(urls);
+                }
             } catch (err) {
                 showError('Failed to fetch suggestions: ' + (err && err.message ? err.message : err));
+            }
+        }
+
+        // Debounce helper for auto-refreshing suggestions upon typing
+        function debounce(fn, wait) {
+            let t = null;
+            return function(...args) {
+                clearTimeout(t);
+                t = setTimeout(() => fn.apply(this, args), wait);
             }
         }
 
@@ -172,6 +218,30 @@
             if (el) el.innerHTML = '';
         }
 
+        let detachSuggestListeners = null;
+        function attachSuggestionAutoRefresh() {
+            try {
+                // Detach previous if present
+                if (typeof detachSuggestListeners === 'function') detachSuggestListeners();
+                const nameEl = document.getElementById('product-name');
+                const catEl = document.getElementById('product-category');
+                const descEl = document.getElementById('product-description');
+                const handler = debounce(() => {
+                    const hasName = (nameEl?.value || '').trim().length > 0;
+                    const hasCat = (catEl?.value || '').trim().length > 0;
+                    if (hasName || hasCat) suggestImagesForCurrentProduct();
+                }, 500);
+                nameEl && nameEl.addEventListener('input', handler);
+                catEl && catEl.addEventListener('change', handler);
+                descEl && descEl.addEventListener('input', handler);
+                detachSuggestListeners = () => {
+                    try { nameEl && nameEl.removeEventListener('input', handler); } catch(_){}
+                    try { catEl && catEl.removeEventListener('change', handler); } catch(_){}
+                    try { descEl && descEl.removeEventListener('input', handler); } catch(_){}
+                };
+            } catch (_) { /* ignore */ }
+        }
+
         // =====================
         // Auto-assign images via free APIs (Pixabay primary, Unsplash fallback, Wikipedia last-resort)
         // Target: grocery items on white background
@@ -202,6 +272,49 @@
                 .replace(/[^a-z0-9\s]/g,' ')
                 .split(/\s+/)
                 .filter(w => w && !stop.has(w) && w.length >= 3)));
+        }
+
+        function pluralizeSimple(n) {
+            const s = (n||'').toLowerCase();
+            if (!s) return s;
+            if (s.endsWith('s')) return s; // already plural or ends with s
+            if (s.endsWith('y')) return s.slice(0,-1) + 'ies';
+            if (s.endsWith('ch') || s.endsWith('sh') || s.endsWith('x') || s.endsWith('z')) return s + 'es';
+            return s + 's';
+        }
+
+        function categoryHints(category) {
+            const c = (category||'').toLowerCase();
+            const hints = [];
+            if (c.includes('fruit')) { hints.push('fruit','fresh'); }
+            if (c.includes('veggie') || c.includes('vegetable')) { hints.push('vegetable','fresh'); }
+            if (c.includes('bakery')) { hints.push('bakery','bread','loaf'); }
+            if (c.includes('meat') || c.includes('poultry')) { hints.push('meat'); }
+            if (c.includes('seafood') || c.includes('fish')) { hints.push('seafood','fish'); }
+            if (c.includes('beverage') || c.includes('drink')) { hints.push('drink','beverage','bottle'); }
+            if (c.includes('snack')) { hints.push('snack'); }
+            return hints;
+        }
+
+        function buildQueryVariants(name, category, description) {
+            const baseName = (name||'').trim();
+            const words = baseName.split(/\s+/);
+            const simpleNoun = words.length === 1 ? baseName : '';
+            const plural = simpleNoun ? pluralizeSimple(simpleNoun) : '';
+            const hints = categoryHints(category);
+            const variants = [];
+            const suffix = 'isolated on white background product';
+            if (baseName && category) variants.push([baseName, category, suffix].filter(Boolean).join(' '));
+            if (baseName) variants.push([baseName, ...hints, suffix].filter(Boolean).join(' '));
+            if (plural) variants.push([plural, ...hints, suffix].filter(Boolean).join(' '));
+            if (baseName) variants.push([baseName, 'whole', 'single', suffix].join(' '));
+            if (baseName) variants.push([baseName, 'fresh', suffix].join(' '));
+            if (baseName) variants.push([baseName, suffix].join(' '));
+            // De-dup and return
+            const seen = new Set();
+            const uniq = [];
+            for (const v of variants) { if (!seen.has(v)) { seen.add(v); uniq.push(v); } }
+            return uniq;
         }
 
         async function searchPixabayImage(query, { tokens = [], negative = [] } = {}) {
@@ -835,6 +948,7 @@
             existingImageKeys = [null, null];
             deleteKeys = [];
             clearSuggestedImages();
+            attachSuggestionAutoRefresh();
         }
 
         // Edit product
@@ -858,6 +972,7 @@
                 document.getElementById('product-modal').style.display = 'block';
                 resetImages();
                 clearSuggestedImages();
+                attachSuggestionAutoRefresh();
                 // Load persisted images (up to 2) as existing
                 const keys = Array.isArray(product.imageKeys) ? product.imageKeys : (product.image_keys || []);
                 existingImageKeys = [keys[0] || null, keys[1] || null];
