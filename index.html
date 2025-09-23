@@ -212,6 +212,16 @@
                         <div class="image-hint">Recommended minimum: 760 × 600 px. Smaller images will be rejected. Any image format is allowed.</div>
                     </div>
                 </div>
+
+                <!-- Suggested Images -->
+                <div class="form-group">
+                    <label class="form-label">Suggested Images</label>
+                    <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
+                        <button type="button" class="add-product-btn" onclick="suggestImagesForCurrentProduct()" title="Find suggested images based on name and category">Find Suggestions</button>
+                        <small style="color:#666;">Picks images with white background when possible.</small>
+                    </div>
+                    <div id="suggested-images" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:10px;"></div>
+                </div>
             </form>
             
             <div class="modal-actions">

@@ -11,6 +11,136 @@
             return window.localStorage.getItem('id_token') || '';
         }
 
+        // ===== Suggested images (multiple candidates) =====
+        async function searchPixabayImages(query, { tokens = [], negative = [] } = {}, limit = 12) {
+            const key = getPixabayApiKey();
+            if (!key) return [];
+            try {
+                const q = encodeURIComponent(query);
+                const url = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo&category=food&per_page=${Math.min(50, Math.max(5, limit*2))}&orientation=horizontal&safesearch=true&colors=white&order=popular`;
+                const resp = await fetch(url);
+                if (!resp.ok) return [];
+                const data = await resp.json();
+                const hits = (data && data.hits) || [];
+                if (!hits.length) return [];
+                const tset = new Set((tokens||[]).map(t=>t.toLowerCase()));
+                const nset = new Set((negative||[]).map(t=>t.toLowerCase()));
+                const scored = hits.map(h => {
+                    const tags = (h.tags||'').toLowerCase();
+                    let score = 0;
+                    if (tags.includes('isolated')) score += 3;
+                    if (tags.includes('white')) score += 2;
+                    for (const t of tset) if (t && tags.includes(t)) score += 4;
+                    score += Math.min(4, Math.floor(((h.imageWidth||0)+(h.imageHeight||0))/1000));
+                    score += Math.min(5, (h.likes||0) / 50);
+                    for (const n of nset) if (n && tags.includes(n)) score -= 5;
+                    return { url: (h.largeImageURL || h.webformatURL || ''), score };
+                }).filter(x => x.url).sort((a,b)=>b.score-a.score);
+                const unique = [];
+                const seen = new Set();
+                for (const s of scored) {
+                    if (!seen.has(s.url)) { seen.add(s.url); unique.push(s.url); }
+                    if (unique.length >= limit) break;
+                }
+                return unique;
+            } catch (_) { return []; }
+        }
+
+        async function searchUnsplashImages(query, limit = 8) {
+            const clientId = window.localStorage.getItem('unsplash_access_key') || '';
+            if (!clientId) return [];
+            try {
+                const q = encodeURIComponent(query);
+                const url = `https://api.unsplash.com/search/photos?query=${q}&per_page=${Math.min(30, Math.max(5, limit))}&content_filter=high&orientation=landscape&client_id=${encodeURIComponent(clientId)}`;
+                const resp = await fetch(url);
+                if (!resp.ok) return [];
+                const data = await resp.json();
+                const results = (data && data.results) || [];
+                const unique = [];
+                const seen = new Set();
+                for (const r of results) {
+                    const u = (r.urls && (r.urls.full || r.urls.regular)) || '';
+                    if (!u) continue;
+                    const desc = (r.alt_description||'').toLowerCase();
+                    // prefer white background by ordering
+                    const bias = (desc.includes('white background') ? 1 : 0);
+                    if (!seen.has(u)) { seen.add(u); unique.push({ u, bias }); }
+                }
+                unique.sort((a,b)=>b.bias-a.bias);
+                return unique.map(x=>x.u).slice(0, limit);
+            } catch (_) { return []; }
+        }
+
+        async function suggestImagesForCurrentProduct() {
+            try {
+                const name = (document.getElementById('product-name')?.value || '').trim();
+                const category = (document.getElementById('product-category')?.value || '').trim();
+                const description = (document.getElementById('product-description')?.value || '').trim();
+                if (!name && !category) {
+                    showError('Enter name or category first to get suggestions.');
+                    return;
+                }
+                // Ensure Pixabay key (prompt once)
+                await ensurePixabayKeyOrPrompt();
+                const tokens = buildTokens(name, category, description);
+                const negatives = [];
+                if (!tokens.includes('rice')) negatives.push('rice');
+                const queryBase = [name, category, 'isolated on white background', 'product', 'grocery'].filter(Boolean).join(' ');
+                const pix = await searchPixabayImages(queryBase, { tokens, negative: negatives }, 12);
+                const uns = await searchUnsplashImages(queryBase, 8);
+                const wiki = []; // skip multi from wikipedia for now
+                const urls = Array.from(new Set([ ...pix, ...uns, ...wiki ]));
+                renderSuggestedImages(urls);
+            } catch (err) {
+                showError('Failed to fetch suggestions: ' + (err && err.message ? err.message : err));
+            }
+        }
+
+        function renderSuggestedImages(urls) {
+            const container = document.getElementById('suggested-images');
+            if (!container) return;
+            if (!urls || urls.length === 0) {
+                container.innerHTML = '<div style="color:#666;">No suggestions found.</div>';
+                return;
+            }
+            const cards = urls.slice(0, 16).map(u => {
+                return `
+                    <div style="display:flex; flex-direction:column; gap:6px; border:1px solid #eee; padding:8px; border-radius:8px; background:#fff;">
+                        <img src="${u}" alt="suggested" style="width:100%; height:100px; object-fit:contain; background:#fff; border:1px solid #f0f0f0;"/>
+                        <div style="display:flex; gap:6px;">
+                            <button type="button" class="action-btn" onclick="pickSuggestedImage(0, '${u.replace(/'/g, "\'")}')">Use as 1</button>
+                            <button type="button" class="action-btn" onclick="pickSuggestedImage(1, '${u.replace(/'/g, "\'")}')">Use as 2</button>
+                        </div>
+                    </div>`;
+            });
+            container.innerHTML = cards.join('');
+        }
+
+        async function pickSuggestedImage(slot, imgUrl) {
+            try {
+                const name = (document.getElementById('product-name')?.value || 'image').trim();
+                // Fetch and process to 760x600 white JPEG, but do NOT upload yet; prepare for Save
+                const resp = await fetch(imgUrl, { mode: 'cors' });
+                if (!resp.ok) throw new Error('fetch failed');
+                const orig = await resp.blob();
+                const processed = await renderToFixedCanvasJpeg(orig, 760, 600, 0.9);
+                if (!processed) throw new Error('process failed');
+                const file = new File([processed], `${name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60)||'image'}-${Date.now()}.jpg`, { type: 'image/jpeg' });
+                const url = URL.createObjectURL(processed);
+                selectedImages[slot] = { file, url, width: 760, height: 600 };
+                const firstIdx = selectedImages.findIndex(x => !!x);
+                carouselIndex = firstIdx >= 0 ? firstIdx : slot;
+                updateCarouselUI();
+                showSuccess(`Selected suggestion for slot ${slot+1}.`);
+            } catch (err) {
+                showError('Failed to select suggested image: ' + (err && err.message ? err.message : err));
+            }
+        }
+
+        // Expose to window for UI hooks
+        window.suggestImagesForCurrentProduct = suggestImagesForCurrentProduct;
+        window.pickSuggestedImage = pickSuggestedImage;
+
         // =====================
         // Auto-assign images via free APIs (Pixabay primary, Unsplash fallback, Wikipedia last-resort)
         // Target: grocery items on white background
