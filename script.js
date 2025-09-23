@@ -80,6 +80,9 @@
                     showError('Enter name or category first to get suggestions.');
                     return;
                 }
+                // Clear previous and show loading state
+                const container = document.getElementById('suggested-images');
+                if (container) container.innerHTML = '<div style="color:#666;">Loading suggestions…</div>';
                 // Ensure Pixabay key (prompt once)
                 await ensurePixabayKeyOrPrompt();
                 const tokens = buildTokens(name, category, description);
@@ -140,6 +143,11 @@
         // Expose to window for UI hooks
         window.suggestImagesForCurrentProduct = suggestImagesForCurrentProduct;
         window.pickSuggestedImage = pickSuggestedImage;
+
+        function clearSuggestedImages() {
+            const el = document.getElementById('suggested-images');
+            if (el) el.innerHTML = '';
+        }
 
         // =====================
         // Auto-assign images via free APIs (Pixabay primary, Unsplash fallback, Wikipedia last-resort)
@@ -803,6 +811,7 @@
             resetImages();
             existingImageKeys = [null, null];
             deleteKeys = [];
+            clearSuggestedImages();
         }
 
         // Edit product
@@ -825,6 +834,7 @@
                 if (scaleEl) scaleEl.checked = product.scaleNeed === true;
                 document.getElementById('product-modal').style.display = 'block';
                 resetImages();
+                clearSuggestedImages();
                 // Load persisted images (up to 2) as existing
                 const keys = Array.isArray(product.imageKeys) ? product.imageKeys : (product.image_keys || []);
                 existingImageKeys = [keys[0] || null, keys[1] || null];
@@ -837,6 +847,16 @@
                         updateCarouselUI();
                     }).catch(() => {/* ignore */});
                 });
+                // Auto-trigger suggestions for this product using its current name/category
+                // Delay slightly to ensure DOM is fully updated
+                setTimeout(() => {
+                    // Only trigger if a name or category exist
+                    const hasName = (document.getElementById('product-name')?.value || '').trim().length > 0;
+                    const hasCat = (document.getElementById('product-category')?.value || '').trim().length > 0;
+                    if (hasName || hasCat) {
+                        suggestImagesForCurrentProduct();
+                    }
+                }, 50);
             }
         }
 
