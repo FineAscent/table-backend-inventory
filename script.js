@@ -1,175 +1,175 @@
- // Backend API Configuration
-        const API_BASE_URL = 'https://w2bspt32w4.execute-api.us-east-1.amazonaws.com/prod';
+// Backend API Configuration
+const API_BASE_URL = 'https://ov07pqkx1d.execute-api.us-east-1.amazonaws.com/dev';
 
-        // Cognito (Admin) Auth Configuration
-        const COGNITO_DOMAIN = 'https://aliabab-inventory-prod-admin.auth.us-east-1.amazoncognito.com';
-        const COGNITO_CLIENT_ID = '7ujm0u63v834c054nf9juh3ook';
-        const REDIRECT_URI = 'https://fineascent.github.io/table-backend-inventory/';
+// Cognito (Admin) Auth Configuration
+const COGNITO_DOMAIN = 'https://store-alibaba-inventory-dev-admin.auth.us-east-1.amazoncognito.com';
+const COGNITO_CLIENT_ID = '7lop8c4imce82rgrh9sn1mb009';
+const REDIRECT_URI = 'https://fineascent.github.io/table-backend-inventory/';
 
-        // Simple auth state helpers
-        function getIdToken() {
-            return window.localStorage.getItem('id_token') || '';
+// Simple auth state helpers
+function getIdToken() {
+    return window.localStorage.getItem('id_token') || '';
+}
+
+async function pickSuggestedImageMain(imgUrl) {
+    // Place into slot 0. If slot 0 was occupied and slot 1 is empty, shift old main to slot 1; otherwise mark old for deletion
+    const prevMain = selectedImages[0];
+    await pickSuggestedImage(0, imgUrl);
+    if (prevMain && prevMain.existing && prevMain.key) {
+        // try to keep previous main in slot 1 if empty; else delete
+        if (!selectedImages[1]) {
+            selectedImages[1] = prevMain;
+            updateCarouselUI();
+        } else {
+            deleteKeys = deleteKeys || [];
+            if (!deleteKeys.includes(prevMain.key)) deleteKeys.push(prevMain.key);
         }
+    }
+}
 
-        async function pickSuggestedImageMain(imgUrl) {
-            // Place into slot 0. If slot 0 was occupied and slot 1 is empty, shift old main to slot 1; otherwise mark old for deletion
-            const prevMain = selectedImages[0];
-            await pickSuggestedImage(0, imgUrl);
-            if (prevMain && prevMain.existing && prevMain.key) {
-                // try to keep previous main in slot 1 if empty; else delete
-                if (!selectedImages[1]) {
-                    selectedImages[1] = prevMain;
-                    updateCarouselUI();
-                } else {
-                    deleteKeys = deleteKeys || [];
-                    if (!deleteKeys.includes(prevMain.key)) deleteKeys.push(prevMain.key);
+// ===== Suggested images (multiple candidates) =====
+async function searchPixabayImages(query, { tokens = [], negative = [], useWhiteFilter = true, includeCategory = true } = {}, limit = 12) {
+    const key = getPixabayApiKey();
+    if (!key) return [];
+    try {
+        const q = encodeURIComponent(query);
+        const base = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo${includeCategory ? `&category=food` : ''}&per_page=${Math.min(50, Math.max(5, limit * 2))}&orientation=horizontal&safesearch=true&order=popular`;
+        const url = useWhiteFilter ? `${base}&colors=white` : base;
+        const resp = await fetch(url);
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        const hits = (data && data.hits) || [];
+        if (!hits.length) return [];
+        const tset = new Set((tokens || []).map(t => t.toLowerCase()));
+        const nset = new Set((negative || []).map(t => t.toLowerCase()));
+        const scored = hits.map(h => {
+            const tags = (h.tags || '').toLowerCase();
+            let score = 0;
+            if (tags.includes('isolated')) score += 3;
+            if (tags.includes('white')) score += 2;
+            for (const t of tset) if (t && tags.includes(t)) score += 4;
+            score += Math.min(4, Math.floor(((h.imageWidth || 0) + (h.imageHeight || 0)) / 1000));
+            score += Math.min(5, (h.likes || 0) / 50);
+            for (const n of nset) if (n && tags.includes(n)) score -= 5;
+            return { url: (h.largeImageURL || h.webformatURL || ''), score };
+        }).filter(x => x.url).sort((a, b) => b.score - a.score);
+        const unique = [];
+        const seen = new Set();
+        for (const s of scored) {
+            if (!seen.has(s.url)) { seen.add(s.url); unique.push(s.url); }
+            if (unique.length >= limit) break;
+        }
+        return unique;
+    } catch (_) { return []; }
+}
+
+async function searchUnsplashImages(query, limit = 8) {
+    const clientId = window.localStorage.getItem('unsplash_access_key') || '';
+    if (!clientId) return [];
+    try {
+        const q = encodeURIComponent(query);
+        const url = `https://api.unsplash.com/search/photos?query=${q}&per_page=${Math.min(30, Math.max(5, limit))}&content_filter=high&orientation=landscape&client_id=${encodeURIComponent(clientId)}`;
+        const resp = await fetch(url);
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        const results = (data && data.results) || [];
+        const unique = [];
+        const seen = new Set();
+        for (const r of results) {
+            const u = (r.urls && (r.urls.full || r.urls.regular)) || '';
+            if (!u) continue;
+            const desc = (r.alt_description || '').toLowerCase();
+            // prefer white background by ordering
+            const bias = (desc.includes('white background') ? 1 : 0);
+            if (!seen.has(u)) { seen.add(u); unique.push({ u, bias }); }
+        }
+        unique.sort((a, b) => b.bias - a.bias);
+        return unique.map(x => x.u).slice(0, limit);
+    } catch (_) { return []; }
+}
+
+async function suggestImagesForCurrentProduct() {
+    try {
+        const name = (document.getElementById('product-name')?.value || '').trim();
+        const category = (document.getElementById('product-category')?.value || '').trim();
+        const description = (document.getElementById('product-description')?.value || '').trim();
+        if (!name && !category) {
+            showError('Enter name or category first to get suggestions.');
+            return;
+        }
+        // Clear previous and show loading state
+        const container = document.getElementById('suggested-images');
+        if (container) container.innerHTML = '<div style="color:#666;">Loading suggestions…</div>';
+        // Ensure keys
+        const hasPixabay = !!(await ensurePixabayKeyOrPrompt());
+        const unsplashKey = window.localStorage.getItem('unsplash_access_key') || '';
+        const tokens = buildTokens(name, category, description);
+        const negatives = [];
+        if (!tokens.includes('rice')) negatives.push('rice');
+        const variants = buildQueryVariants(name, category, description);
+        let urls = [];
+        if (hasPixabay) {
+            for (const v of variants) {
+                urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: true, includeCategory: true }, 12);
+                if (urls.length) break;
+            }
+            if (urls.length === 0) {
+                for (const v of variants) {
+                    urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: false, includeCategory: true }, 12);
+                    if (urls.length) break;
                 }
             }
-        }
-
-        // ===== Suggested images (multiple candidates) =====
-        async function searchPixabayImages(query, { tokens = [], negative = [], useWhiteFilter = true, includeCategory = true } = {}, limit = 12) {
-            const key = getPixabayApiKey();
-            if (!key) return [];
-            try {
-                const q = encodeURIComponent(query);
-                const base = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo${includeCategory?`&category=food`:''}&per_page=${Math.min(50, Math.max(5, limit*2))}&orientation=horizontal&safesearch=true&order=popular`;
-                const url = useWhiteFilter ? `${base}&colors=white` : base;
-                const resp = await fetch(url);
-                if (!resp.ok) return [];
-                const data = await resp.json();
-                const hits = (data && data.hits) || [];
-                if (!hits.length) return [];
-                const tset = new Set((tokens||[]).map(t=>t.toLowerCase()));
-                const nset = new Set((negative||[]).map(t=>t.toLowerCase()));
-                const scored = hits.map(h => {
-                    const tags = (h.tags||'').toLowerCase();
-                    let score = 0;
-                    if (tags.includes('isolated')) score += 3;
-                    if (tags.includes('white')) score += 2;
-                    for (const t of tset) if (t && tags.includes(t)) score += 4;
-                    score += Math.min(4, Math.floor(((h.imageWidth||0)+(h.imageHeight||0))/1000));
-                    score += Math.min(5, (h.likes||0) / 50);
-                    for (const n of nset) if (n && tags.includes(n)) score -= 5;
-                    return { url: (h.largeImageURL || h.webformatURL || ''), score };
-                }).filter(x => x.url).sort((a,b)=>b.score-a.score);
-                const unique = [];
-                const seen = new Set();
-                for (const s of scored) {
-                    if (!seen.has(s.url)) { seen.add(s.url); unique.push(s.url); }
-                    if (unique.length >= limit) break;
+            if (urls.length === 0) {
+                // Try again without category=food (Pixabay sometimes mislabels)
+                for (const v of variants) {
+                    urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: true, includeCategory: false }, 12);
+                    if (urls.length) break;
                 }
-                return unique;
-            } catch (_) { return []; }
-        }
-
-        async function searchUnsplashImages(query, limit = 8) {
-            const clientId = window.localStorage.getItem('unsplash_access_key') || '';
-            if (!clientId) return [];
-            try {
-                const q = encodeURIComponent(query);
-                const url = `https://api.unsplash.com/search/photos?query=${q}&per_page=${Math.min(30, Math.max(5, limit))}&content_filter=high&orientation=landscape&client_id=${encodeURIComponent(clientId)}`;
-                const resp = await fetch(url);
-                if (!resp.ok) return [];
-                const data = await resp.json();
-                const results = (data && data.results) || [];
-                const unique = [];
-                const seen = new Set();
-                for (const r of results) {
-                    const u = (r.urls && (r.urls.full || r.urls.regular)) || '';
-                    if (!u) continue;
-                    const desc = (r.alt_description||'').toLowerCase();
-                    // prefer white background by ordering
-                    const bias = (desc.includes('white background') ? 1 : 0);
-                    if (!seen.has(u)) { seen.add(u); unique.push({ u, bias }); }
-                }
-                unique.sort((a,b)=>b.bias-a.bias);
-                return unique.map(x=>x.u).slice(0, limit);
-            } catch (_) { return []; }
-        }
-
-        async function suggestImagesForCurrentProduct() {
-            try {
-                const name = (document.getElementById('product-name')?.value || '').trim();
-                const category = (document.getElementById('product-category')?.value || '').trim();
-                const description = (document.getElementById('product-description')?.value || '').trim();
-                if (!name && !category) {
-                    showError('Enter name or category first to get suggestions.');
-                    return;
-                }
-                // Clear previous and show loading state
-                const container = document.getElementById('suggested-images');
-                if (container) container.innerHTML = '<div style="color:#666;">Loading suggestions…</div>';
-                // Ensure keys
-                const hasPixabay = !!(await ensurePixabayKeyOrPrompt());
-                const unsplashKey = window.localStorage.getItem('unsplash_access_key') || '';
-                const tokens = buildTokens(name, category, description);
-                const negatives = [];
-                if (!tokens.includes('rice')) negatives.push('rice');
-                const variants = buildQueryVariants(name, category, description);
-                let urls = [];
-                if (hasPixabay) {
+                if (urls.length === 0) {
                     for (const v of variants) {
-                        urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: true, includeCategory: true }, 12);
-                        if (urls.length) break;
-                    }
-                    if (urls.length === 0) {
-                        for (const v of variants) {
-                            urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: false, includeCategory: true }, 12);
-                            if (urls.length) break;
-                        }
-                    }
-                    if (urls.length === 0) {
-                        // Try again without category=food (Pixabay sometimes mislabels)
-                        for (const v of variants) {
-                            urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: true, includeCategory: false }, 12);
-                            if (urls.length) break;
-                        }
-                        if (urls.length === 0) {
-                            for (const v of variants) {
-                                urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: false, includeCategory: false }, 12);
-                                if (urls.length) break;
-                            }
-                        }
-                    }
-                }
-                if (urls.length === 0 && unsplashKey) {
-                    for (const v of variants) {
-                        urls = await searchUnsplashImages(v, 12);
+                        urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: false, includeCategory: false }, 12);
                         if (urls.length) break;
                     }
                 }
-                // We skip Wikipedia for multi-suggestions to avoid mixed licenses
-                urls = Array.from(new Set(urls));
-                if (!urls.length && !hasPixabay && !unsplashKey) {
-                    renderSuggestedImages([]);
-                    showError('No image providers configured. Set a Pixabay key (recommended) or Unsplash access key in localStorage.');
-                } else {
-                    renderSuggestedImages(urls);
-                }
-            } catch (err) {
-                showError('Failed to fetch suggestions: ' + (err && err.message ? err.message : err));
             }
         }
-
-        // Debounce helper for auto-refreshing suggestions upon typing
-        function debounce(fn, wait) {
-            let t = null;
-            return function(...args) {
-                clearTimeout(t);
-                t = setTimeout(() => fn.apply(this, args), wait);
+        if (urls.length === 0 && unsplashKey) {
+            for (const v of variants) {
+                urls = await searchUnsplashImages(v, 12);
+                if (urls.length) break;
             }
         }
+        // We skip Wikipedia for multi-suggestions to avoid mixed licenses
+        urls = Array.from(new Set(urls));
+        if (!urls.length && !hasPixabay && !unsplashKey) {
+            renderSuggestedImages([]);
+            showError('No image providers configured. Set a Pixabay key (recommended) or Unsplash access key in localStorage.');
+        } else {
+            renderSuggestedImages(urls);
+        }
+    } catch (err) {
+        showError('Failed to fetch suggestions: ' + (err && err.message ? err.message : err));
+    }
+}
 
-        function renderSuggestedImages(urls) {
-            const container = document.getElementById('suggested-images');
-            if (!container) return;
-            if (!urls || urls.length === 0) {
-                container.innerHTML = '<div style="color:#666;">No suggestions found.</div>';
-                return;
-            }
-            const cards = urls.slice(0, 16).map(u => {
-                return `
+// Debounce helper for auto-refreshing suggestions upon typing
+function debounce(fn, wait) {
+    let t = null;
+    return function (...args) {
+        clearTimeout(t);
+        t = setTimeout(() => fn.apply(this, args), wait);
+    }
+}
+
+function renderSuggestedImages(urls) {
+    const container = document.getElementById('suggested-images');
+    if (!container) return;
+    if (!urls || urls.length === 0) {
+        container.innerHTML = '<div style="color:#666;">No suggestions found.</div>';
+        return;
+    }
+    const cards = urls.slice(0, 16).map(u => {
+        return `
                     <div style="display:flex; flex-direction:column; gap:6px; border:1px solid #eee; padding:8px; border-radius:8px; background:#fff;">
                         <img src="${u}" alt="suggested" style="width:100%; height:100px; object-fit:contain; background:#fff; border:1px solid #f0f0f0;"/>
                         <div style="display:flex; gap:6px;">
@@ -178,667 +178,667 @@
                             <button type="button" class="action-btn" onclick="pickSuggestedImage(1, '${u.replace(/'/g, "\'")}')">Use as 2</button>
                         </div>
                     </div>`;
-            });
-            container.innerHTML = cards.join('');
+    });
+    container.innerHTML = cards.join('');
+}
+
+async function pickSuggestedImage(slot, imgUrl) {
+    try {
+        const name = (document.getElementById('product-name')?.value || 'image').trim();
+        // Fetch and process to 760x600 white JPEG, but do NOT upload yet; prepare for Save
+        const resp = await fetch(imgUrl, { mode: 'cors' });
+        if (!resp.ok) throw new Error('fetch failed');
+        const orig = await resp.blob();
+        const processed = await renderToFixedCanvasJpeg(orig, 760, 600, 0.9);
+        if (!processed) throw new Error('process failed');
+        const file = new File([processed], `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image'}-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const url = URL.createObjectURL(processed);
+        // If replacing an existing persisted image, mark it for deletion
+        const prev = selectedImages[slot];
+        if (prev && prev.existing && prev.key) {
+            deleteKeys = deleteKeys || [];
+            if (!deleteKeys.includes(prev.key)) deleteKeys.push(prev.key);
         }
+        selectedImages[slot] = { file, url, width: 760, height: 600 };
+        const firstIdx = selectedImages.findIndex(x => !!x);
+        carouselIndex = firstIdx >= 0 ? firstIdx : slot;
+        updateCarouselUI();
+        showSuccess(`Selected suggestion for slot ${slot + 1}.`);
+    } catch (err) {
+        showError('Failed to select suggested image: ' + (err && err.message ? err.message : err));
+    }
+}
 
-        async function pickSuggestedImage(slot, imgUrl) {
-            try {
-                const name = (document.getElementById('product-name')?.value || 'image').trim();
-                // Fetch and process to 760x600 white JPEG, but do NOT upload yet; prepare for Save
-                const resp = await fetch(imgUrl, { mode: 'cors' });
-                if (!resp.ok) throw new Error('fetch failed');
-                const orig = await resp.blob();
-                const processed = await renderToFixedCanvasJpeg(orig, 760, 600, 0.9);
-                if (!processed) throw new Error('process failed');
-                const file = new File([processed], `${name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'').slice(0,60)||'image'}-${Date.now()}.jpg`, { type: 'image/jpeg' });
-                const url = URL.createObjectURL(processed);
-                // If replacing an existing persisted image, mark it for deletion
-                const prev = selectedImages[slot];
-                if (prev && prev.existing && prev.key) {
-                    deleteKeys = deleteKeys || [];
-                    if (!deleteKeys.includes(prev.key)) deleteKeys.push(prev.key);
-                }
-                selectedImages[slot] = { file, url, width: 760, height: 600 };
-                const firstIdx = selectedImages.findIndex(x => !!x);
-                carouselIndex = firstIdx >= 0 ? firstIdx : slot;
-                updateCarouselUI();
-                showSuccess(`Selected suggestion for slot ${slot+1}.`);
-            } catch (err) {
-                showError('Failed to select suggested image: ' + (err && err.message ? err.message : err));
-            }
-        }
+// Expose to window for UI hooks
+window.suggestImagesForCurrentProduct = suggestImagesForCurrentProduct;
+window.pickSuggestedImage = pickSuggestedImage;
 
-        // Expose to window for UI hooks
-        window.suggestImagesForCurrentProduct = suggestImagesForCurrentProduct;
-        window.pickSuggestedImage = pickSuggestedImage;
+function clearSuggestedImages() {
+    const el = document.getElementById('suggested-images');
+    if (el) el.innerHTML = '';
+}
 
-        function clearSuggestedImages() {
-            const el = document.getElementById('suggested-images');
-            if (el) el.innerHTML = '';
-        }
-
-        let detachSuggestListeners = null;
-        function attachSuggestionAutoRefresh() {
-            try {
-                // Detach previous if present
-                if (typeof detachSuggestListeners === 'function') detachSuggestListeners();
-                const nameEl = document.getElementById('product-name');
-                const catEl = document.getElementById('product-category');
-                const descEl = document.getElementById('product-description');
-                const handler = debounce(() => {
-                    const hasName = (nameEl?.value || '').trim().length > 0;
-                    const hasCat = (catEl?.value || '').trim().length > 0;
-                    if (hasName || hasCat) suggestImagesForCurrentProduct();
-                }, 500);
-                nameEl && nameEl.addEventListener('input', handler);
-                catEl && catEl.addEventListener('change', handler);
-                descEl && descEl.addEventListener('input', handler);
-                detachSuggestListeners = () => {
-                    try { nameEl && nameEl.removeEventListener('input', handler); } catch(_){}
-                    try { catEl && catEl.removeEventListener('change', handler); } catch(_){}
-                    try { descEl && descEl.removeEventListener('input', handler); } catch(_){}
-                };
-            } catch (_) { /* ignore */ }
-        }
-
-        // =====================
-        // Auto-assign images via free APIs (Pixabay primary, Unsplash fallback, Wikipedia last-resort)
-        // Target: grocery items on white background
-        // =====================
-        function getPixabayApiKey() {
-            return window.localStorage.getItem('pixabay_api_key') || '';
-        }
-
-        function setPixabayApiKey(key) {
-            if (key) window.localStorage.setItem('pixabay_api_key', key.trim());
-        }
-
-        async function ensurePixabayKeyOrPrompt() {
-            let key = getPixabayApiKey();
-            if (!key) {
-                key = window.prompt('Enter your Pixabay API key to auto-assign product images:', '');
-                if (key && key.trim()) {
-                    setPixabayApiKey(key.trim());
-                }
-            }
-            return getPixabayApiKey();
-        }
-
-        function buildTokens(name, category, description) {
-            const text = [name, category, description].filter(Boolean).join(' ').toLowerCase();
-            const stop = new Set(['the','a','an','of','and','or','with','for','on','in','by','pack','pcs','piece','pieces']);
-            return Array.from(new Set(text
-                .replace(/[^a-z0-9\s]/g,' ')
-                .split(/\s+/)
-                .filter(w => w && !stop.has(w) && w.length >= 3)));
-        }
-
-        function pluralizeSimple(n) {
-            const s = (n||'').toLowerCase();
-            if (!s) return s;
-            if (s.endsWith('s')) return s; // already plural or ends with s
-            if (s.endsWith('y')) return s.slice(0,-1) + 'ies';
-            if (s.endsWith('ch') || s.endsWith('sh') || s.endsWith('x') || s.endsWith('z')) return s + 'es';
-            return s + 's';
-        }
-
-        function categoryHints(category) {
-            const c = (category||'').toLowerCase();
-            const hints = [];
-            if (c.includes('fruit')) { hints.push('fruit','fresh'); }
-            if (c.includes('veggie') || c.includes('vegetable')) { hints.push('vegetable','fresh'); }
-            if (c.includes('bakery')) { hints.push('bakery','bread','loaf'); }
-            if (c.includes('meat') || c.includes('poultry')) { hints.push('meat'); }
-            if (c.includes('seafood') || c.includes('fish')) { hints.push('seafood','fish'); }
-            if (c.includes('beverage') || c.includes('drink')) { hints.push('drink','beverage','bottle'); }
-            if (c.includes('snack')) { hints.push('snack'); }
-            return hints;
-        }
-
-        function buildQueryVariants(name, category, description) {
-            const baseName = (name||'').trim();
-            const words = baseName.split(/\s+/);
-            const simpleNoun = words.length === 1 ? baseName : '';
-            const plural = simpleNoun ? pluralizeSimple(simpleNoun) : '';
-            const hints = categoryHints(category);
-            const variants = [];
-            const suffix = 'isolated on white background product';
-            if (baseName && category) variants.push([baseName, category, suffix].filter(Boolean).join(' '));
-            if (baseName) variants.push([baseName, ...hints, suffix].filter(Boolean).join(' '));
-            if (plural) variants.push([plural, ...hints, suffix].filter(Boolean).join(' '));
-            if (baseName) variants.push([baseName, 'whole', 'single', suffix].join(' '));
-            if (baseName) variants.push([baseName, 'fresh', suffix].join(' '));
-            if (baseName) variants.push([baseName, suffix].join(' '));
-            // De-dup and return
-            const seen = new Set();
-            const uniq = [];
-            for (const v of variants) { if (!seen.has(v)) { seen.add(v); uniq.push(v); } }
-            return uniq;
-        }
-
-        async function searchPixabayImage(query, { tokens = [], negative = [] } = {}) {
-            const key = getPixabayApiKey();
-            if (!key) return null;
-            try {
-                const q = encodeURIComponent(query);
-                const url = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo&category=food&per_page=15&orientation=horizontal&safesearch=true&colors=white&order=popular`;
-                const resp = await fetch(url);
-                if (!resp.ok) return null;
-                const data = await resp.json();
-                const hits = (data && data.hits) || [];
-                if (!hits.length) return null;
-                const tset = new Set(tokens.map(t=>t.toLowerCase()));
-                const nset = new Set((negative||[]).map(t=>t.toLowerCase()));
-                const scored = hits.map(h => {
-                    const tags = (h.tags||'').toLowerCase();
-                    let score = 0;
-                    // prefer white/isolated keywords
-                    if (tags.includes('isolated')) score += 3;
-                    if (tags.includes('white')) score += 2;
-                    // token matches
-                    for (const t of tset) if (t && tags.includes(t)) score += 4;
-                    // size preference
-                    score += Math.min(4, Math.floor(((h.imageWidth||0)+(h.imageHeight||0))/1000));
-                    // likes as tie-breaker
-                    score += Math.min(5, (h.likes||0) / 50);
-                    // penalize negatives
-                    for (const n of nset) if (n && tags.includes(n)) score -= 5;
-                    // penalize if already used
-                    const url = h.largeImageURL || h.webformatURL || '';
-                    if (assignedImageUrlsSession.has(url)) score -= 10;
-                    return { h, score };
-                })
-                .filter(x => x.score > -1) // drop very poor matches
-                .sort((a,b)=>b.score - a.score);
-                const pick = scored.length ? scored[0].h : hits[0];
-                const chosen = pick && (pick.largeImageURL || pick.webformatURL) || null;
-                return chosen;
-            } catch (_) { return null; }
-        }
-
-        async function searchUnsplashImage(query) {
-            // Optional: use client_id if configured via localStorage to improve quota; otherwise rely on public hotlinking which may be rate limited/blocked
-            const clientId = window.localStorage.getItem('unsplash_access_key') || '';
-            if (!clientId) return null;
-            try {
-                const q = encodeURIComponent(query);
-                const url = `https://api.unsplash.com/search/photos?query=${q}&per_page=5&content_filter=high&orientation=landscape&client_id=${encodeURIComponent(clientId)}`;
-                const resp = await fetch(url);
-                if (!resp.ok) return null;
-                const data = await resp.json();
-                const results = (data && data.results) || [];
-                if (!results.length) return null;
-                // Prefer results with white backgrounds by checking tags/alt_description
-                let pick = results.find(r => (r.alt_description||'').toLowerCase().includes('white background')) || results[0];
-                // Use full or regular URLs
-                return (pick && (pick.urls && (pick.urls.full || pick.urls.regular))) || null;
-            } catch (_) { return null; }
-        }
-
-        async function searchWikipediaImage(query) {
-            try {
-                const q = encodeURIComponent(query);
-                const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${q}&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=800&format=json&origin=*`;
-                const resp = await fetch(url);
-                if (!resp.ok) return null;
-                const data = await resp.json();
-                if (!data || !data.query || !data.query.pages) return null;
-                const pages = Object.values(data.query.pages);
-                if (!pages.length) return null;
-                const page = pages[0];
-                const thumb = page && page.thumbnail && page.thumbnail.source;
-                return thumb || null;
-            } catch (_) { return null; }
-        }
-
-        async function searchGroceryImage(name, category, description) {
-            // Build tokens and negatives; keep 'rice' out unless it is part of tokens
-            const tokens = buildTokens(name, category, description);
-            const negatives = [];
-            if (!tokens.includes('rice')) negatives.push('rice');
-            // Craft a white background focused query
-            const queryBase = [name, category, 'isolated on white background', 'product', 'grocery'].filter(Boolean).join(' ');
-            // Try Pixabay first (best licensing for this use case)
-            let url = await searchPixabayImage(queryBase, { tokens, negative: negatives });
-            if (url) return url;
-            // Then Unsplash (requires access key)
-            url = await searchUnsplashImage(queryBase);
-            if (url) return url;
-            // Fall back to Wikipedia if nothing else
-            return await searchWikipediaImage([name, category].filter(Boolean).join(' '));
-        }
-
-        // Render an image blob into a 760x600 white background canvas (contain fit) and export as JPEG
-        async function renderToFixedCanvasJpeg(blob, targetW = 760, targetH = 600, quality = 0.9) {
-            // Create bitmap or HTMLImageElement
-            let bitmap = null;
-            try {
-                if ('createImageBitmap' in window) {
-                    bitmap = await createImageBitmap(blob);
-                }
-            } catch (_) { bitmap = null; }
-            if (!bitmap) {
-                const url = URL.createObjectURL(blob);
-                try {
-                    const img = await new Promise((resolve, reject) => {
-                        const el = new Image();
-                        el.crossOrigin = 'anonymous';
-                        el.onload = () => resolve(el);
-                        el.onerror = reject;
-                        el.src = url;
-                    });
-                    // Draw using HTMLImageElement
-                    const canvas = document.createElement('canvas');
-                    canvas.width = targetW; canvas.height = targetH;
-                    const ctx = canvas.getContext('2d');
-                    // Fill white background
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(0, 0, targetW, targetH);
-                    const iw = img.naturalWidth || img.width; const ih = img.naturalHeight || img.height;
-                    const scale = Math.min(targetW / iw, targetH / ih);
-                    const dw = Math.floor(iw * scale); const dh = Math.floor(ih * scale);
-                    const dx = Math.floor((targetW - dw) / 2); const dy = Math.floor((targetH - dh) / 2);
-                    ctx.imageSmoothingQuality = 'high';
-                    ctx.drawImage(img, dx, dy, dw, dh);
-                    const out = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
-                    return out;
-                } finally {
-                    URL.revokeObjectURL(url);
-                }
-            } else {
-                // Draw using ImageBitmap
-                const canvas = document.createElement('canvas');
-                canvas.width = targetW; canvas.height = targetH;
-                const ctx = canvas.getContext('2d');
-                ctx.fillStyle = '#ffffff';
-                ctx.fillRect(0, 0, targetW, targetH);
-                const iw = bitmap.width; const ih = bitmap.height;
-                const scale = Math.min(targetW / iw, targetH / ih);
-                const dw = Math.floor(iw * scale); const dh = Math.floor(ih * scale);
-                const dx = Math.floor((targetW - dw) / 2); const dy = Math.floor((targetH - dh) / 2);
-                ctx.imageSmoothingQuality = 'high';
-                ctx.drawImage(bitmap, dx, dy, dw, dh);
-                const out = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
-                try { bitmap.close && bitmap.close(); } catch (_) {}
-                return out;
-            }
-        }
-
-        async function fetchAndUploadImage(imageUrl, product, attemptName) {
-            try {
-                const resp = await fetch(imageUrl, { mode: 'cors' });
-                if (!resp.ok) throw new Error(`image fetch ${resp.status}`);
-                const originalBlob = await resp.blob();
-                // Normalize to 760x600 JPEG on white background
-                const processed = await renderToFixedCanvasJpeg(originalBlob, 760, 600, 0.9);
-                if (!processed) throw new Error('failed to process image');
-                const contentType = 'image/jpeg';
-                // File naming
-                const safeBase = (attemptName || product.name || 'image').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
-                const fileName = `${safeBase}-${Date.now()}.jpg`;
-                const { uploadUrl, key } = await dbService.getUploadUrl({ fileName, contentType, productId: product.id });
-                const putResp = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: processed });
-                if (!putResp.ok) {
-                    const t = await putResp.text();
-                    throw new Error(`upload failed ${putResp.status}: ${t}`);
-                }
-                return key;
-            } catch (e) {
-                console.warn('fetchAndUploadImage failed', e);
-                return null;
-            }
-        }
-
-        async function autoAssignImagesForAll() {
-            try {
-                showLoading(true);
-                let updated = 0;
-                let skipped = 0;
-                // Refresh products to ensure latest
-                if (!products || !products.length) {
-                    await loadProducts();
-                }
-                // Ensure Pixabay key configured (prompt once)
-                const key = await ensurePixabayKeyOrPrompt();
-                if (!key) {
-                    showError('Pixabay API key is required to auto-assign images. You can also set an Unsplash key in localStorage under "unsplash_access_key".');
-                    return;
-                }
-                assignedImageUrlsSession = new Set();
-                for (const p of products) {
-                    const existingKeys = Array.isArray(p.imageKeys) ? p.imageKeys : (p.image_keys || []);
-                    if (existingKeys && existingKeys.length > 0) { skipped++; continue; }
-                    const imgUrl = await searchGroceryImage(p.name, p.category, p.description);
-                    if (!imgUrl) { skipped++; continue; }
-                    const key = await fetchAndUploadImage(imgUrl, p, p.name);
-                    if (!key) { skipped++; continue; }
-                    assignedImageUrlsSession.add(imgUrl);
-                    try {
-                        await dbService.putProduct({
-                            id: p.id,
-                            name: p.name,
-                            description: p.description,
-                            category: p.category,
-                            price: Number(p.price),
-                            priceUnit: p.priceUnit || 'piece',
-                            barcode: p.barcode,
-                            availability: p.availability,
-                            areaLocation: p.areaLocation || 'A1',
-                            scaleNeed: p.scaleNeed === true,
-                            imageKeys: [key]
-                        });
-                        updated++;
-                    } catch (err) {
-                        console.warn('putProduct failed', err);
-                    }
-                }
-                await loadProducts();
-                showSuccess(`Auto-assign complete. Updated: ${updated}. Skipped: ${skipped}.`);
-            } catch (err) {
-                showError('Auto-assign images failed: ' + (err && err.message ? err.message : err));
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        // Expose to window for button click
-        window.autoAssignImagesForAll = autoAssignImagesForAll;
-
-        // =====================
-        // Bulk remove all images
-        // =====================
-        async function removeAllImages() {
-            if (!confirm('Remove all images from all products? This cannot be undone.')) return;
-            try {
-                showLoading(true);
-                // Ensure we have latest list
-                if (!products || !products.length) {
-                    await loadProducts();
-                }
-                let changed = 0; let skipped = 0;
-                for (const p of products) {
-                    const existingKeys = Array.isArray(p.imageKeys) ? p.imageKeys : (p.image_keys || []);
-                    if (!existingKeys || existingKeys.length === 0) { skipped++; continue; }
-                    try {
-                        await dbService.putProduct({
-                            id: p.id,
-                            name: p.name,
-                            description: p.description,
-                            category: p.category,
-                            price: Number(p.price),
-                            priceUnit: p.priceUnit || 'piece',
-                            barcode: p.barcode,
-                            availability: p.availability,
-                            areaLocation: p.areaLocation || 'A1',
-                            scaleNeed: p.scaleNeed === true,
-                            imageKeys: [],
-                            deleteKeys: existingKeys
-                        });
-                        changed++;
-                    } catch (err) {
-                        console.warn('removeAllImages: putProduct failed for', p.id, err);
-                    }
-                }
-                await loadProducts();
-                showSuccess(`Remove images complete. Updated: ${changed}. Skipped (no images): ${skipped}.`);
-            } catch (err) {
-                showError('Remove all images failed: ' + (err && err.message ? err.message : err));
-            } finally {
-                showLoading(false);
-            }
-        }
-
-        window.removeAllImages = removeAllImages;
-
-        function setIdToken(token) {
-            if (token) window.localStorage.setItem('id_token', token);
-        }
-
-        function clearSession() {
-            window.localStorage.removeItem('id_token');
-        }
-
-        function parseHashForToken() {
-            if (window.location.hash && window.location.hash.includes('id_token')) {
-                const params = new URLSearchParams(window.location.hash.substring(1));
-                const idToken = params.get('id_token');
-                if (idToken) {
-                    setIdToken(idToken);
-                    // Clean hash from URL
-                    history.replaceState(null, document.title, window.location.pathname + window.location.search);
-                }
-            }
-        }
-
-        function decodeJwtPayload(token) {
-            try {
-                const parts = token.split('.');
-                if (parts.length !== 3) return {};
-                const payload = parts[1]
-                    .replace(/-/g, '+')
-                    .replace(/_/g, '/');
-                const json = atob(payload);
-                return JSON.parse(json);
-            } catch { return {}; }
-        }
-
-        function getSignedInEmail() {
-            const t = getIdToken();
-            if (!t) return '';
-            const p = decodeJwtPayload(t);
-            return p.email || p['cognito:username'] || '';
-        }
-
-        function isLoggedIn() {
-            return !!getIdToken();
-        }
-
-        function login() {
-            const url = `${COGNITO_DOMAIN}/oauth2/authorize?client_id=${encodeURIComponent(COGNITO_CLIENT_ID)}&response_type=token&scope=openid+email+profile&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
-            window.location.href = url;
-        }
-
-        function logout() {
-            const logoutUrl = `${COGNITO_DOMAIN}/logout?client_id=${encodeURIComponent(COGNITO_CLIENT_ID)}&logout_uri=${encodeURIComponent(REDIRECT_URI)}`;
-            clearSession();
-            window.location.href = logoutUrl;
-        }
-
-        // Global variables
-        let products = [];
-        let currentEditingId = null;
-        // Images selected in the modal (frontend-only for now)
-        let selectedImages = [null, null]; // { file, url, width, height }
-        let carouselIndex = 0;
-        // Existing images for currently edited product
-        let existingImageKeys = [null, null];
-        let deleteKeys = [];
-        // Search state
-        let searchTerm = '';
-        let filters = {
-            'out-of-stock': true
+let detachSuggestListeners = null;
+function attachSuggestionAutoRefresh() {
+    try {
+        // Detach previous if present
+        if (typeof detachSuggestListeners === 'function') detachSuggestListeners();
+        const nameEl = document.getElementById('product-name');
+        const catEl = document.getElementById('product-category');
+        const descEl = document.getElementById('product-description');
+        const handler = debounce(() => {
+            const hasName = (nameEl?.value || '').trim().length > 0;
+            const hasCat = (catEl?.value || '').trim().length > 0;
+            if (hasName || hasCat) suggestImagesForCurrentProduct();
+        }, 500);
+        nameEl && nameEl.addEventListener('input', handler);
+        catEl && catEl.addEventListener('change', handler);
+        descEl && descEl.addEventListener('input', handler);
+        detachSuggestListeners = () => {
+            try { nameEl && nameEl.removeEventListener('input', handler); } catch (_) { }
+            try { catEl && catEl.removeEventListener('change', handler); } catch (_) { }
+            try { descEl && descEl.removeEventListener('input', handler); } catch (_) { }
         };
-        // In-memory cache for signed GET URLs
-        const imageUrlCache = new Map(); // key -> url
+    } catch (_) { /* ignore */ }
+}
 
-        // Initialize the application
-        document.addEventListener('DOMContentLoaded', function() {
-            parseHashForToken();
-            const email = getSignedInEmail();
-            const signedMsg = document.getElementById('signed-in-msg');
-            const loginBtn = document.getElementById('login-btn');
-            const logoutBtn = document.getElementById('logout-btn');
-            if (isLoggedIn()) {
-                if (signedMsg) signedMsg.textContent = `signed user in to this admin at ${email}`;
-                if (loginBtn) loginBtn.style.display = 'none';
-                if (logoutBtn) logoutBtn.style.display = 'inline-flex';
-            } else {
-                if (signedMsg) signedMsg.textContent = '';
-                if (loginBtn) loginBtn.style.display = 'inline-flex';
-                if (logoutBtn) logoutBtn.style.display = 'none';
-            }
-            loadProducts();
-        });
+// =====================
+// Auto-assign images via free APIs (Pixabay primary, Unsplash fallback, Wikipedia last-resort)
+// Target: grocery items on white background
+// =====================
+function getPixabayApiKey() {
+    return window.localStorage.getItem('pixabay_api_key') || '';
+}
 
-        // Backend service (uses deployed API)
-        class DynamoDBService {
-            constructor() {
-                // no-op
-            }
+function setPixabayApiKey(key) {
+    if (key) window.localStorage.setItem('pixabay_api_key', key.trim());
+}
 
-            initializeData() {
-                // no seed data; backend holds truth
-            }
-
-            async scanProducts(lastKey) {
-                const headers = {};
-                const token = getIdToken();
-                if (token) headers['Authorization'] = `Bearer ${token}`;
-                const url = new URL(`${API_BASE_URL}/products`);
-                if (lastKey) url.searchParams.set('lastKey', lastKey);
-                const resp = await fetch(url.toString(), {
-                    method: 'GET',
-                    headers
-                });
-                if (!resp.ok) {
-                    const t = await resp.text();
-                    if (resp.status === 401) {
-                        throw new Error('Unauthorized. Please login to access products.');
-                    }
-                    throw new Error(`List failed (${resp.status}): ${t}`);
-                }
-                return resp.json(); // expected shape: { items: [...], nextToken? }
-            }
-
-            async putProduct(product) {
-                const hasId = !!product.id;
-                const url = hasId ? `${API_BASE_URL}/products/${encodeURIComponent(product.id)}` : `${API_BASE_URL}/products`;
-                const method = hasId ? 'PUT' : 'POST';
-                const body = JSON.stringify({
-                    name: product.name,
-                    description: product.description,
-                    category: product.category,
-                    price: Number(product.price),
-                    priceUnit: product.priceUnit || 'piece',
-                    barcode: product.barcode,
-                    availability: product.availability,
-                    areaLocation: product.areaLocation || 'A1',
-                    scaleNeed: product.scaleNeed === true,
-                    imageKeys: Array.isArray(product.imageKeys) ? product.imageKeys : [],
-                    deleteKeys: Array.isArray(product.deleteKeys) ? product.deleteKeys : undefined
-                });
-                const headers = { 'Content-Type': 'application/json' };
-                const token = getIdToken();
-                if (token) headers['Authorization'] = `Bearer ${token}`;
-                const resp = await fetch(url, {
-                    method,
-                    headers,
-                    body
-                });
-                if (!resp.ok) {
-                    const t = await resp.text();
-                    throw new Error(`Save failed (${resp.status}): ${t}`);
-                }
-                return resp.json();
-            }
-
-            async getUploadUrl({ fileName, contentType, productId }) {
-                const headers = { 'Content-Type': 'application/json' };
-                const token = getIdToken();
-                if (token) headers['Authorization'] = `Bearer ${token}`;
-                const resp = await fetch(`${API_BASE_URL}/upload-url`, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ fileName, contentType, productId })
-                });
-                if (!resp.ok) {
-                    const t = await resp.text();
-                    throw new Error(`Upload URL failed (${resp.status}): ${t}`);
-                }
-                return resp.json();
-            }
-
-            async getImageUrl(key) {
-                if (imageUrlCache.has(key)) return { url: imageUrlCache.get(key) };
-                const headers = { 'Content-Type': 'application/json' };
-                const token = getIdToken();
-                if (token) headers['Authorization'] = `Bearer ${token}`;
-                const resp = await fetch(`${API_BASE_URL}/image-url`, {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({ key })
-                });
-                if (!resp.ok) {
-                    const t = await resp.text();
-                    if (resp.status === 401) {
-                        throw new Error('Unauthorized while fetching image URL. Please login again.');
-                    }
-                    throw new Error(`Image URL failed (${resp.status}): ${t}`);
-                }
-                const json = await resp.json();
-                if (json && json.url) imageUrlCache.set(key, json.url);
-                return json;
-            }
-
-            async deleteProduct(id) {
-                const headers = {};
-                const token = getIdToken();
-                if (token) headers['Authorization'] = `Bearer ${token}`;
-                const resp = await fetch(`${API_BASE_URL}/products/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
-                if (!resp.ok && resp.status !== 204) {
-                    const t = await resp.text();
-                    throw new Error(`Delete failed (${resp.status}): ${t}`);
-                }
-                return true;
-            }
+async function ensurePixabayKeyOrPrompt() {
+    let key = getPixabayApiKey();
+    if (!key) {
+        key = window.prompt('Enter your Pixabay API key to auto-assign product images:', '');
+        if (key && key.trim()) {
+            setPixabayApiKey(key.trim());
         }
+    }
+    return getPixabayApiKey();
+}
 
-        const dbService = new DynamoDBService();
+function buildTokens(name, category, description) {
+    const text = [name, category, description].filter(Boolean).join(' ').toLowerCase();
+    const stop = new Set(['the', 'a', 'an', 'of', 'and', 'or', 'with', 'for', 'on', 'in', 'by', 'pack', 'pcs', 'piece', 'pieces']);
+    return Array.from(new Set(text
+        .replace(/[^a-z0-9\s]/g, ' ')
+        .split(/\s+/)
+        .filter(w => w && !stop.has(w) && w.length >= 3)));
+}
 
-        // Track used image URLs in current auto-assign session to avoid repeats
-        let assignedImageUrlsSession = new Set();
+function pluralizeSimple(n) {
+    const s = (n || '').toLowerCase();
+    if (!s) return s;
+    if (s.endsWith('s')) return s; // already plural or ends with s
+    if (s.endsWith('y')) return s.slice(0, -1) + 'ies';
+    if (s.endsWith('ch') || s.endsWith('sh') || s.endsWith('x') || s.endsWith('z')) return s + 'es';
+    return s + 's';
+}
 
-        // Load products from backend API
-        async function loadProducts() {
+function categoryHints(category) {
+    const c = (category || '').toLowerCase();
+    const hints = [];
+    if (c.includes('fruit')) { hints.push('fruit', 'fresh'); }
+    if (c.includes('veggie') || c.includes('vegetable')) { hints.push('vegetable', 'fresh'); }
+    if (c.includes('bakery')) { hints.push('bakery', 'bread', 'loaf'); }
+    if (c.includes('meat') || c.includes('poultry')) { hints.push('meat'); }
+    if (c.includes('seafood') || c.includes('fish')) { hints.push('seafood', 'fish'); }
+    if (c.includes('beverage') || c.includes('drink')) { hints.push('drink', 'beverage', 'bottle'); }
+    if (c.includes('snack')) { hints.push('snack'); }
+    return hints;
+}
+
+function buildQueryVariants(name, category, description) {
+    const baseName = (name || '').trim();
+    const words = baseName.split(/\s+/);
+    const simpleNoun = words.length === 1 ? baseName : '';
+    const plural = simpleNoun ? pluralizeSimple(simpleNoun) : '';
+    const hints = categoryHints(category);
+    const variants = [];
+    const suffix = 'isolated on white background product';
+    if (baseName && category) variants.push([baseName, category, suffix].filter(Boolean).join(' '));
+    if (baseName) variants.push([baseName, ...hints, suffix].filter(Boolean).join(' '));
+    if (plural) variants.push([plural, ...hints, suffix].filter(Boolean).join(' '));
+    if (baseName) variants.push([baseName, 'whole', 'single', suffix].join(' '));
+    if (baseName) variants.push([baseName, 'fresh', suffix].join(' '));
+    if (baseName) variants.push([baseName, suffix].join(' '));
+    // De-dup and return
+    const seen = new Set();
+    const uniq = [];
+    for (const v of variants) { if (!seen.has(v)) { seen.add(v); uniq.push(v); } }
+    return uniq;
+}
+
+async function searchPixabayImage(query, { tokens = [], negative = [] } = {}) {
+    const key = getPixabayApiKey();
+    if (!key) return null;
+    try {
+        const q = encodeURIComponent(query);
+        const url = `https://pixabay.com/api/?key=${encodeURIComponent(key)}&q=${q}&image_type=photo&category=food&per_page=15&orientation=horizontal&safesearch=true&colors=white&order=popular`;
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const hits = (data && data.hits) || [];
+        if (!hits.length) return null;
+        const tset = new Set(tokens.map(t => t.toLowerCase()));
+        const nset = new Set((negative || []).map(t => t.toLowerCase()));
+        const scored = hits.map(h => {
+            const tags = (h.tags || '').toLowerCase();
+            let score = 0;
+            // prefer white/isolated keywords
+            if (tags.includes('isolated')) score += 3;
+            if (tags.includes('white')) score += 2;
+            // token matches
+            for (const t of tset) if (t && tags.includes(t)) score += 4;
+            // size preference
+            score += Math.min(4, Math.floor(((h.imageWidth || 0) + (h.imageHeight || 0)) / 1000));
+            // likes as tie-breaker
+            score += Math.min(5, (h.likes || 0) / 50);
+            // penalize negatives
+            for (const n of nset) if (n && tags.includes(n)) score -= 5;
+            // penalize if already used
+            const url = h.largeImageURL || h.webformatURL || '';
+            if (assignedImageUrlsSession.has(url)) score -= 10;
+            return { h, score };
+        })
+            .filter(x => x.score > -1) // drop very poor matches
+            .sort((a, b) => b.score - a.score);
+        const pick = scored.length ? scored[0].h : hits[0];
+        const chosen = pick && (pick.largeImageURL || pick.webformatURL) || null;
+        return chosen;
+    } catch (_) { return null; }
+}
+
+async function searchUnsplashImage(query) {
+    // Optional: use client_id if configured via localStorage to improve quota; otherwise rely on public hotlinking which may be rate limited/blocked
+    const clientId = window.localStorage.getItem('unsplash_access_key') || '';
+    if (!clientId) return null;
+    try {
+        const q = encodeURIComponent(query);
+        const url = `https://api.unsplash.com/search/photos?query=${q}&per_page=5&content_filter=high&orientation=landscape&client_id=${encodeURIComponent(clientId)}`;
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        const results = (data && data.results) || [];
+        if (!results.length) return null;
+        // Prefer results with white backgrounds by checking tags/alt_description
+        let pick = results.find(r => (r.alt_description || '').toLowerCase().includes('white background')) || results[0];
+        // Use full or regular URLs
+        return (pick && (pick.urls && (pick.urls.full || pick.urls.regular))) || null;
+    } catch (_) { return null; }
+}
+
+async function searchWikipediaImage(query) {
+    try {
+        const q = encodeURIComponent(query);
+        const url = `https://en.wikipedia.org/w/api.php?action=query&generator=search&gsrsearch=${q}&gsrlimit=1&prop=pageimages&piprop=thumbnail&pithumbsize=800&format=json&origin=*`;
+        const resp = await fetch(url);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (!data || !data.query || !data.query.pages) return null;
+        const pages = Object.values(data.query.pages);
+        if (!pages.length) return null;
+        const page = pages[0];
+        const thumb = page && page.thumbnail && page.thumbnail.source;
+        return thumb || null;
+    } catch (_) { return null; }
+}
+
+async function searchGroceryImage(name, category, description) {
+    // Build tokens and negatives; keep 'rice' out unless it is part of tokens
+    const tokens = buildTokens(name, category, description);
+    const negatives = [];
+    if (!tokens.includes('rice')) negatives.push('rice');
+    // Craft a white background focused query
+    const queryBase = [name, category, 'isolated on white background', 'product', 'grocery'].filter(Boolean).join(' ');
+    // Try Pixabay first (best licensing for this use case)
+    let url = await searchPixabayImage(queryBase, { tokens, negative: negatives });
+    if (url) return url;
+    // Then Unsplash (requires access key)
+    url = await searchUnsplashImage(queryBase);
+    if (url) return url;
+    // Fall back to Wikipedia if nothing else
+    return await searchWikipediaImage([name, category].filter(Boolean).join(' '));
+}
+
+// Render an image blob into a 760x600 white background canvas (contain fit) and export as JPEG
+async function renderToFixedCanvasJpeg(blob, targetW = 760, targetH = 600, quality = 0.9) {
+    // Create bitmap or HTMLImageElement
+    let bitmap = null;
+    try {
+        if ('createImageBitmap' in window) {
+            bitmap = await createImageBitmap(blob);
+        }
+    } catch (_) { bitmap = null; }
+    if (!bitmap) {
+        const url = URL.createObjectURL(blob);
+        try {
+            const img = await new Promise((resolve, reject) => {
+                const el = new Image();
+                el.crossOrigin = 'anonymous';
+                el.onload = () => resolve(el);
+                el.onerror = reject;
+                el.src = url;
+            });
+            // Draw using HTMLImageElement
+            const canvas = document.createElement('canvas');
+            canvas.width = targetW; canvas.height = targetH;
+            const ctx = canvas.getContext('2d');
+            // Fill white background
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, targetW, targetH);
+            const iw = img.naturalWidth || img.width; const ih = img.naturalHeight || img.height;
+            const scale = Math.min(targetW / iw, targetH / ih);
+            const dw = Math.floor(iw * scale); const dh = Math.floor(ih * scale);
+            const dx = Math.floor((targetW - dw) / 2); const dy = Math.floor((targetH - dh) / 2);
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(img, dx, dy, dw, dh);
+            const out = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+            return out;
+        } finally {
+            URL.revokeObjectURL(url);
+        }
+    } else {
+        // Draw using ImageBitmap
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW; canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, targetW, targetH);
+        const iw = bitmap.width; const ih = bitmap.height;
+        const scale = Math.min(targetW / iw, targetH / ih);
+        const dw = Math.floor(iw * scale); const dh = Math.floor(ih * scale);
+        const dx = Math.floor((targetW - dw) / 2); const dy = Math.floor((targetH - dh) / 2);
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(bitmap, dx, dy, dw, dh);
+        const out = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+        try { bitmap.close && bitmap.close(); } catch (_) { }
+        return out;
+    }
+}
+
+async function fetchAndUploadImage(imageUrl, product, attemptName) {
+    try {
+        const resp = await fetch(imageUrl, { mode: 'cors' });
+        if (!resp.ok) throw new Error(`image fetch ${resp.status}`);
+        const originalBlob = await resp.blob();
+        // Normalize to 760x600 JPEG on white background
+        const processed = await renderToFixedCanvasJpeg(originalBlob, 760, 600, 0.9);
+        if (!processed) throw new Error('failed to process image');
+        const contentType = 'image/jpeg';
+        // File naming
+        const safeBase = (attemptName || product.name || 'image').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
+        const fileName = `${safeBase}-${Date.now()}.jpg`;
+        const { uploadUrl, key } = await dbService.getUploadUrl({ fileName, contentType, productId: product.id });
+        const putResp = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: processed });
+        if (!putResp.ok) {
+            const t = await putResp.text();
+            throw new Error(`upload failed ${putResp.status}: ${t}`);
+        }
+        return key;
+    } catch (e) {
+        console.warn('fetchAndUploadImage failed', e);
+        return null;
+    }
+}
+
+async function autoAssignImagesForAll() {
+    try {
+        showLoading(true);
+        let updated = 0;
+        let skipped = 0;
+        // Refresh products to ensure latest
+        if (!products || !products.length) {
+            await loadProducts();
+        }
+        // Ensure Pixabay key configured (prompt once)
+        const key = await ensurePixabayKeyOrPrompt();
+        if (!key) {
+            showError('Pixabay API key is required to auto-assign images. You can also set an Unsplash key in localStorage under "unsplash_access_key".');
+            return;
+        }
+        assignedImageUrlsSession = new Set();
+        for (const p of products) {
+            const existingKeys = Array.isArray(p.imageKeys) ? p.imageKeys : (p.image_keys || []);
+            if (existingKeys && existingKeys.length > 0) { skipped++; continue; }
+            const imgUrl = await searchGroceryImage(p.name, p.category, p.description);
+            if (!imgUrl) { skipped++; continue; }
+            const key = await fetchAndUploadImage(imgUrl, p, p.name);
+            if (!key) { skipped++; continue; }
+            assignedImageUrlsSession.add(imgUrl);
             try {
-                showLoading(true);
-                const all = [];
-                let safety = 0;
-                let lastKey = undefined;
-                do {
-                    const result = await dbService.scanProducts(lastKey);
-                    const items = result.items || result.Items || [];
-                    all.push(...items);
-                    lastKey = result.lastKey;
-                    safety++;
-                } while (lastKey && safety < 100);
-                products = all;
-                renderProducts();
-            } catch (error) {
-                showError('Failed to load products: ' + error.message);
-            } finally {
-                showLoading(false);
+                await dbService.putProduct({
+                    id: p.id,
+                    name: p.name,
+                    description: p.description,
+                    category: p.category,
+                    price: Number(p.price),
+                    priceUnit: p.priceUnit || 'piece',
+                    barcode: p.barcode,
+                    availability: p.availability,
+                    areaLocation: p.areaLocation || 'A1',
+                    scaleNeed: p.scaleNeed === true,
+                    imageKeys: [key]
+                });
+                updated++;
+            } catch (err) {
+                console.warn('putProduct failed', err);
             }
         }
+        await loadProducts();
+        showSuccess(`Auto-assign complete. Updated: ${updated}. Skipped: ${skipped}.`);
+    } catch (err) {
+        showError('Auto-assign images failed: ' + (err && err.message ? err.message : err));
+    } finally {
+        showLoading(false);
+    }
+}
 
-        // Render products in the table
-        function renderProducts() {
-            const tbody = document.getElementById('products-tbody');
-            const filteredProducts = applyFilters(products);
+// Expose to window for button click
+window.autoAssignImagesForAll = autoAssignImagesForAll;
 
-            tbody.innerHTML = '';
-            // Update product count badge
-            const countEl = document.getElementById('product-count');
-            if (countEl) countEl.textContent = `(${filteredProducts.length})`;
+// =====================
+// Bulk remove all images
+// =====================
+async function removeAllImages() {
+    if (!confirm('Remove all images from all products? This cannot be undone.')) return;
+    try {
+        showLoading(true);
+        // Ensure we have latest list
+        if (!products || !products.length) {
+            await loadProducts();
+        }
+        let changed = 0; let skipped = 0;
+        for (const p of products) {
+            const existingKeys = Array.isArray(p.imageKeys) ? p.imageKeys : (p.image_keys || []);
+            if (!existingKeys || existingKeys.length === 0) { skipped++; continue; }
+            try {
+                await dbService.putProduct({
+                    id: p.id,
+                    name: p.name,
+                    description: p.description,
+                    category: p.category,
+                    price: Number(p.price),
+                    priceUnit: p.priceUnit || 'piece',
+                    barcode: p.barcode,
+                    availability: p.availability,
+                    areaLocation: p.areaLocation || 'A1',
+                    scaleNeed: p.scaleNeed === true,
+                    imageKeys: [],
+                    deleteKeys: existingKeys
+                });
+                changed++;
+            } catch (err) {
+                console.warn('removeAllImages: putProduct failed for', p.id, err);
+            }
+        }
+        await loadProducts();
+        showSuccess(`Remove images complete. Updated: ${changed}. Skipped (no images): ${skipped}.`);
+    } catch (err) {
+        showError('Remove all images failed: ' + (err && err.message ? err.message : err));
+    } finally {
+        showLoading(false);
+    }
+}
 
-            filteredProducts.forEach(product => {
-                const row = document.createElement('tr');
-                const thumbCellId = `thumb-${product.id}`;
-                const unit = (product.priceUnit || 'piece');
-                const unitLabelMap = { piece: 'piece', lb: 'lb', oz: 'oz', g: 'g', kg: 'kg', gallon: 'gallon', dozen: 'dozen', loaf: 'loaf', bag: 'bag', bags: 'bags', carton: 'carton', block: 'block', jar: 'jar', cup: 'cup', box: 'box', pack: 'pack', can: 'can', bottle: 'bottle' };
-                const unitLabel = unitLabelMap[unit] || unit;
-                row.innerHTML = `
+window.removeAllImages = removeAllImages;
+
+function setIdToken(token) {
+    if (token) window.localStorage.setItem('id_token', token);
+}
+
+function clearSession() {
+    window.localStorage.removeItem('id_token');
+}
+
+function parseHashForToken() {
+    if (window.location.hash && window.location.hash.includes('id_token')) {
+        const params = new URLSearchParams(window.location.hash.substring(1));
+        const idToken = params.get('id_token');
+        if (idToken) {
+            setIdToken(idToken);
+            // Clean hash from URL
+            history.replaceState(null, document.title, window.location.pathname + window.location.search);
+        }
+    }
+}
+
+function decodeJwtPayload(token) {
+    try {
+        const parts = token.split('.');
+        if (parts.length !== 3) return {};
+        const payload = parts[1]
+            .replace(/-/g, '+')
+            .replace(/_/g, '/');
+        const json = atob(payload);
+        return JSON.parse(json);
+    } catch { return {}; }
+}
+
+function getSignedInEmail() {
+    const t = getIdToken();
+    if (!t) return '';
+    const p = decodeJwtPayload(t);
+    return p.email || p['cognito:username'] || '';
+}
+
+function isLoggedIn() {
+    return !!getIdToken();
+}
+
+function login() {
+    const url = `${COGNITO_DOMAIN}/oauth2/authorize?client_id=${encodeURIComponent(COGNITO_CLIENT_ID)}&response_type=token&scope=openid+email+profile&redirect_uri=${encodeURIComponent(REDIRECT_URI)}`;
+    window.location.href = url;
+}
+
+function logout() {
+    const logoutUrl = `${COGNITO_DOMAIN}/logout?client_id=${encodeURIComponent(COGNITO_CLIENT_ID)}&logout_uri=${encodeURIComponent(REDIRECT_URI)}`;
+    clearSession();
+    window.location.href = logoutUrl;
+}
+
+// Global variables
+let products = [];
+let currentEditingId = null;
+// Images selected in the modal (frontend-only for now)
+let selectedImages = [null, null]; // { file, url, width, height }
+let carouselIndex = 0;
+// Existing images for currently edited product
+let existingImageKeys = [null, null];
+let deleteKeys = [];
+// Search state
+let searchTerm = '';
+let filters = {
+    'out-of-stock': true
+};
+// In-memory cache for signed GET URLs
+const imageUrlCache = new Map(); // key -> url
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', function () {
+    parseHashForToken();
+    const email = getSignedInEmail();
+    const signedMsg = document.getElementById('signed-in-msg');
+    const loginBtn = document.getElementById('login-btn');
+    const logoutBtn = document.getElementById('logout-btn');
+    if (isLoggedIn()) {
+        if (signedMsg) signedMsg.textContent = `signed user in to this admin at ${email}`;
+        if (loginBtn) loginBtn.style.display = 'none';
+        if (logoutBtn) logoutBtn.style.display = 'inline-flex';
+    } else {
+        if (signedMsg) signedMsg.textContent = '';
+        if (loginBtn) loginBtn.style.display = 'inline-flex';
+        if (logoutBtn) logoutBtn.style.display = 'none';
+    }
+    loadProducts();
+});
+
+// Backend service (uses deployed API)
+class DynamoDBService {
+    constructor() {
+        // no-op
+    }
+
+    initializeData() {
+        // no seed data; backend holds truth
+    }
+
+    async scanProducts(lastKey) {
+        const headers = {};
+        const token = getIdToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const url = new URL(`${API_BASE_URL}/products`);
+        if (lastKey) url.searchParams.set('lastKey', lastKey);
+        const resp = await fetch(url.toString(), {
+            method: 'GET',
+            headers
+        });
+        if (!resp.ok) {
+            const t = await resp.text();
+            if (resp.status === 401) {
+                throw new Error('Unauthorized. Please login to access products.');
+            }
+            throw new Error(`List failed (${resp.status}): ${t}`);
+        }
+        return resp.json(); // expected shape: { items: [...], nextToken? }
+    }
+
+    async putProduct(product) {
+        const hasId = !!product.id;
+        const url = hasId ? `${API_BASE_URL}/products/${encodeURIComponent(product.id)}` : `${API_BASE_URL}/products`;
+        const method = hasId ? 'PUT' : 'POST';
+        const body = JSON.stringify({
+            name: product.name,
+            description: product.description,
+            category: product.category,
+            price: Number(product.price),
+            priceUnit: product.priceUnit || 'piece',
+            barcode: product.barcode,
+            availability: product.availability,
+            areaLocation: product.areaLocation || 'A1',
+            scaleNeed: product.scaleNeed === true,
+            imageKeys: Array.isArray(product.imageKeys) ? product.imageKeys : [],
+            deleteKeys: Array.isArray(product.deleteKeys) ? product.deleteKeys : undefined
+        });
+        const headers = { 'Content-Type': 'application/json' };
+        const token = getIdToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch(url, {
+            method,
+            headers,
+            body
+        });
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(`Save failed (${resp.status}): ${t}`);
+        }
+        return resp.json();
+    }
+
+    async getUploadUrl({ fileName, contentType, productId }) {
+        const headers = { 'Content-Type': 'application/json' };
+        const token = getIdToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch(`${API_BASE_URL}/upload-url`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ fileName, contentType, productId })
+        });
+        if (!resp.ok) {
+            const t = await resp.text();
+            throw new Error(`Upload URL failed (${resp.status}): ${t}`);
+        }
+        return resp.json();
+    }
+
+    async getImageUrl(key) {
+        if (imageUrlCache.has(key)) return { url: imageUrlCache.get(key) };
+        const headers = { 'Content-Type': 'application/json' };
+        const token = getIdToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch(`${API_BASE_URL}/image-url`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ key })
+        });
+        if (!resp.ok) {
+            const t = await resp.text();
+            if (resp.status === 401) {
+                throw new Error('Unauthorized while fetching image URL. Please login again.');
+            }
+            throw new Error(`Image URL failed (${resp.status}): ${t}`);
+        }
+        const json = await resp.json();
+        if (json && json.url) imageUrlCache.set(key, json.url);
+        return json;
+    }
+
+    async deleteProduct(id) {
+        const headers = {};
+        const token = getIdToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+        const resp = await fetch(`${API_BASE_URL}/products/${encodeURIComponent(id)}`, { method: 'DELETE', headers });
+        if (!resp.ok && resp.status !== 204) {
+            const t = await resp.text();
+            throw new Error(`Delete failed (${resp.status}): ${t}`);
+        }
+        return true;
+    }
+}
+
+const dbService = new DynamoDBService();
+
+// Track used image URLs in current auto-assign session to avoid repeats
+let assignedImageUrlsSession = new Set();
+
+// Load products from backend API
+async function loadProducts() {
+    try {
+        showLoading(true);
+        const all = [];
+        let safety = 0;
+        let lastKey = undefined;
+        do {
+            const result = await dbService.scanProducts(lastKey);
+            const items = result.items || result.Items || [];
+            all.push(...items);
+            lastKey = result.lastKey;
+            safety++;
+        } while (lastKey && safety < 100);
+        products = all;
+        renderProducts();
+    } catch (error) {
+        showError('Failed to load products: ' + error.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Render products in the table
+function renderProducts() {
+    const tbody = document.getElementById('products-tbody');
+    const filteredProducts = applyFilters(products);
+
+    tbody.innerHTML = '';
+    // Update product count badge
+    const countEl = document.getElementById('product-count');
+    if (countEl) countEl.textContent = `(${filteredProducts.length})`;
+
+    filteredProducts.forEach(product => {
+        const row = document.createElement('tr');
+        const thumbCellId = `thumb-${product.id}`;
+        const unit = (product.priceUnit || 'piece');
+        const unitLabelMap = { piece: 'piece', lb: 'lb', oz: 'oz', g: 'g', kg: 'kg', gallon: 'gallon', dozen: 'dozen', loaf: 'loaf', bag: 'bag', bags: 'bags', carton: 'carton', block: 'block', jar: 'jar', cup: 'cup', box: 'box', pack: 'pack', can: 'can', bottle: 'bottle' };
+        const unitLabel = unitLabelMap[unit] || unit;
+        row.innerHTML = `
                     <td>
                         <div class="product-image" id="${thumbCellId}">📷</div>
                     </td>
@@ -854,384 +854,269 @@
                         <button class="action-btn delete-btn" onclick="deleteProduct('${product.id}')">Delete</button>
                     </td>
                 `;
-                tbody.appendChild(row);
+        tbody.appendChild(row);
 
-                // Render thumbnail if available
-                const keys = product.imageKeys || product.image_keys || [];
-                const cell = document.getElementById(thumbCellId);
-                if (cell) cell.innerHTML = '📷';
-                if (Array.isArray(keys) && keys.length > 0) {
-                    const firstKey = keys[0];
-                    const isDirectUrl = typeof firstKey === 'string' && /^https?:\/\//i.test(firstKey);
-                    const setImg = (src) => {
-                        const c = document.getElementById(thumbCellId);
-                        if (!c) return;
-                        if (!src) { c.textContent = '📷'; return; }
-                        c.innerHTML = `<img id="${thumbCellId}-img" src="${src}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;" onerror="window.refreshThumb && window.refreshThumb('${firstKey}','${thumbCellId}')"/>`;
-                    };
-                    if (isDirectUrl) {
-                        setImg(firstKey);
-                    } else {
-                        dbService.getImageUrl(firstKey).then(({ url }) => {
-                            setImg(url);
-                        }).catch((e) => {
-                            console.warn('getImageUrl failed for key', firstKey, e);
-                            setImg(null);
-                        });
-                    }
-                }
-            });
-        }
-
-        // Attempt to refresh a thumbnail when a signed URL has expired (403). Will try once.
-        window.refreshThumb = async function(key, cellId) {
-            try {
-                const cell = document.getElementById(cellId);
-                const img = document.getElementById(cellId + '-img');
-                if (!cell) return;
-                // Prevent infinite loops: if we've already retried, bail out
-                if (img && img.dataset && img.dataset.retried === '1') {
-                    cell.textContent = '📷';
-                    return;
-                }
-                // Fetch a fresh signed URL (bypass cache by temporarily clearing)
-                try { imageUrlCache.delete && imageUrlCache.delete(key); } catch(_){}
-                const { url } = await dbService.getImageUrl(key);
-                if (!url) { cell.textContent = '📷'; return; }
-                // Append a cache buster
-                const finalUrl = url + (url.includes('?') ? '&' : '?') + 'r=' + Date.now();
-                if (img) {
-                    img.dataset.retried = '1';
-                    img.src = finalUrl;
-                    img.onerror = function() { this.onerror = null; this.parentElement.textContent = '📷'; };
-                } else {
-                    cell.innerHTML = `<img id="${cellId}-img" src="${finalUrl}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;" onerror="this.onerror=null;this.parentElement.textContent='📷';"/>`;
-                }
-            } catch (e) {
-                const cell = document.getElementById(cellId);
-                if (cell) cell.textContent = '📷';
-            }
-        }
-
-        // Apply filters to products
-        function applyFilters(products) {
-            const term = (searchTerm || '').trim().toLowerCase();
-            return products.filter(product => {
-                // Text search filter (name or barcode)
-                if (term) {
-                    const name = (product.name || '').toLowerCase();
-                    const barcode = (product.barcode || '').toLowerCase();
-                    if (!name.includes(term) && !barcode.includes(term)) return false;
-                }
-                return true;
-            });
-        }
-
-        // Toggle filter
-        function toggleFilter(filterType) {
-            const checkbox = document.getElementById(filterType + '-checkbox');
-            filters[filterType] = !filters[filterType];
-            
-            if (filters[filterType]) {
-                checkbox.classList.add('active');
+        // Render thumbnail if available
+        const keys = product.imageKeys || product.image_keys || [];
+        const cell = document.getElementById(thumbCellId);
+        if (cell) cell.innerHTML = '📷';
+        if (Array.isArray(keys) && keys.length > 0) {
+            const firstKey = keys[0];
+            const isDirectUrl = typeof firstKey === 'string' && /^https?:\/\//i.test(firstKey);
+            const setImg = (src) => {
+                const c = document.getElementById(thumbCellId);
+                if (!c) return;
+                if (!src) { c.textContent = '📷'; return; }
+                c.innerHTML = `<img id="${thumbCellId}-img" src="${src}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;" onerror="window.refreshThumb && window.refreshThumb('${firstKey}','${thumbCellId}')"/>`;
+            };
+            if (isDirectUrl) {
+                setImg(firstKey);
             } else {
-                checkbox.classList.remove('active');
-            }
-            
-            renderProducts();
-        }
-
-        // Show/hide loading
-        function showLoading(show) {
-            document.getElementById('loading').style.display = show ? 'block' : 'none';
-            document.getElementById('products-table').style.display = show ? 'none' : 'table';
-        }
-
-        // Show error message
-        function showError(message) {
-            const errorDiv = document.getElementById('error-message');
-            errorDiv.innerHTML = `<div class="error">${message}</div>`;
-            setTimeout(() => {
-                errorDiv.innerHTML = '';
-            }, 5000);
-        }
-
-        // Show success message
-        function showSuccess(message) {
-            const errorDiv = document.getElementById('error-message');
-            errorDiv.innerHTML = `<div class="success">${message}</div>`;
-            setTimeout(() => {
-                errorDiv.innerHTML = '';
-            }, 3000);
-        }
-
-        // =====================
-        // Search controls
-        // =====================
-        function onSearchInput(e) {
-            searchTerm = e.target.value || '';
-            renderProducts();
-        }
-
-        function clearSearch() {
-            searchTerm = '';
-            const input = document.getElementById('product-search');
-            if (input) input.value = '';
-            renderProducts();
-        }
-
-        // Open add product modal
-        function openAddProductModal() {
-            currentEditingId = null;
-            document.getElementById('modal-title').textContent = 'Add Product';
-            document.getElementById('product-form').reset();
-            document.getElementById('product-modal').style.display = 'block';
-            const unitEl = document.getElementById('product-price-unit');
-            if (unitEl) unitEl.value = 'piece';
-            const areaEl = document.getElementById('product-area');
-            if (areaEl) areaEl.value = 'A1';
-            const scaleEl = document.getElementById('product-scale-need');
-            if (scaleEl) scaleEl.checked = false;
-            // reset images
-            resetImages();
-            existingImageKeys = [null, null];
-            deleteKeys = [];
-            clearSuggestedImages();
-            attachSuggestionAutoRefresh();
-        }
-
-        // Edit product
-        function editProduct(id) {
-            const product = products.find(p => p.id === id);
-            if (product) {
-                currentEditingId = id;
-                document.getElementById('modal-title').textContent = 'Edit Product';
-                document.getElementById('product-name').value = product.name;
-                document.getElementById('product-description').value = product.description;
-                document.getElementById('product-category').value = product.category;
-                document.getElementById('product-price').value = product.price;
-                const unitEl = document.getElementById('product-price-unit');
-                if (unitEl) unitEl.value = product.priceUnit || 'piece';
-                document.getElementById('product-barcode').value = product.barcode;
-                document.getElementById('product-availability').value = product.availability;
-                const areaEl = document.getElementById('product-area');
-                if (areaEl) areaEl.value = product.areaLocation || 'A1';
-                const scaleEl = document.getElementById('product-scale-need');
-                if (scaleEl) scaleEl.checked = product.scaleNeed === true;
-                document.getElementById('product-modal').style.display = 'block';
-                resetImages();
-                clearSuggestedImages();
-                attachSuggestionAutoRefresh();
-                // Load persisted images (up to 2) as existing
-                const keys = Array.isArray(product.imageKeys) ? product.imageKeys : (product.image_keys || []);
-                existingImageKeys = [keys[0] || null, keys[1] || null];
-                deleteKeys = [];
-                keys.forEach((k, idx) => {
-                    if (!k) return;
-                    dbService.getImageUrl(k).then(({ url }) => {
-                        if (!url) return;
-                        selectedImages[idx] = { file: null, url, width: 0, height: 0, key: k, existing: true };
-                        updateCarouselUI();
-                    }).catch(() => {/* ignore */});
+                dbService.getImageUrl(firstKey).then(({ url }) => {
+                    setImg(url);
+                }).catch((e) => {
+                    console.warn('getImageUrl failed for key', firstKey, e);
+                    setImg(null);
                 });
-                // Auto-trigger suggestions for this product using its current name/category
-                // Delay slightly to ensure DOM is fully updated
-                setTimeout(() => {
-                    // Only trigger if a name or category exist
-                    const hasName = (document.getElementById('product-name')?.value || '').trim().length > 0;
-                    const hasCat = (document.getElementById('product-category')?.value || '').trim().length > 0;
-                    if (hasName || hasCat) {
-                        suggestImagesForCurrentProduct();
-                    }
-                }, 50);
             }
         }
+    });
+}
 
-        // Save product (uploads images first to S3, then persists product with imageKeys)
-        async function saveProduct() {
-            try {
-                const formData = {
-                    name: document.getElementById('product-name').value,
-                    description: document.getElementById('product-description').value,
-                    category: document.getElementById('product-category').value,
-                    price: parseFloat(document.getElementById('product-price').value),
-                    priceUnit: (document.getElementById('product-price-unit') && document.getElementById('product-price-unit').value) || 'piece',
-                    barcode: document.getElementById('product-barcode').value,
-                    availability: document.getElementById('product-availability').value,
-                    areaLocation: (document.getElementById('product-area') && document.getElementById('product-area').value) || 'A1',
-                    scaleNeed: (document.getElementById('product-scale-need') && document.getElementById('product-scale-need').checked) === true
-                };
-
-                if (currentEditingId) {
-                    formData.id = currentEditingId;
-                }
-
-                // Upload new images to S3 per slot and track uploadedKey on selectedImages entries
-                for (let i = 0; i < selectedImages.length; i++) {
-                    const sel = selectedImages[i];
-                    if (!sel || !sel.file) continue; // only new files get uploaded
-                    const file = sel.file;
-                    const contentType = file.type || 'application/octet-stream';
-                    const { uploadUrl, key } = await dbService.getUploadUrl({
-                        fileName: file.name,
-                        contentType,
-                        productId: currentEditingId || undefined
-                    });
-                    const putResp = await fetch(uploadUrl, {
-                        method: 'PUT',
-                        headers: { 'Content-Type': contentType },
-                        body: file
-                    });
-                    if (!putResp.ok) {
-                        const t = await putResp.text();
-                        throw new Error(`Image upload failed (${putResp.status}): ${t}`);
-                    }
-                    selectedImages[i].uploadedKey = key;
-                }
-
-                // Build final imageKeys list in slot order (0..1), using existing keys for kept images and uploadedKey for new ones
-                const finalKeys = [];
-                for (let i = 0; i < selectedImages.length; i++) {
-                    const sel = selectedImages[i];
-                    if (!sel) continue;
-                    if (sel.existing && sel.key) finalKeys.push(sel.key);
-                    else if (sel.uploadedKey) finalKeys.push(sel.uploadedKey);
-                }
-
-                // Always send imageKeys (even if empty) so backend can clear images if needed
-                formData.imageKeys = finalKeys;
-                if (currentEditingId && deleteKeys.length > 0) formData.deleteKeys = deleteKeys;
-
-                await dbService.putProduct(formData);
-                // Clear cached signed URLs for deleted keys to prevent stale thumbnails
-                if (Array.isArray(deleteKeys)) {
-                    for (const k of deleteKeys) {
-                        try { imageUrlCache.delete(k); } catch (_) {}
-                    }
-                }
-                closeModal();
-                showSuccess(currentEditingId ? 'Product updated successfully!' : 'Product added successfully!');
-                loadProducts();
-            } catch (error) {
-                const modalError = document.getElementById('modal-error');
-                modalError.innerHTML = `<div class="error">Failed to save product: ${error.message}</div>`;
-            }
+// Attempt to refresh a thumbnail when a signed URL has expired (403). Will try once.
+window.refreshThumb = async function (key, cellId) {
+    try {
+        const cell = document.getElementById(cellId);
+        const img = document.getElementById(cellId + '-img');
+        if (!cell) return;
+        // Prevent infinite loops: if we've already retried, bail out
+        if (img && img.dataset && img.dataset.retried === '1') {
+            cell.textContent = '📷';
+            return;
         }
-
-        // Delete product
-        async function deleteProduct(id) {
-            if (confirm('Are you sure you want to delete this product?')) {
-                try {
-                    await dbService.deleteProduct(id);
-                    showSuccess('Product deleted successfully!');
-                    loadProducts();
-                } catch (error) {
-                    showError('Failed to delete product: ' + error.message);
-                }
-            }
+        // Fetch a fresh signed URL (bypass cache by temporarily clearing)
+        try { imageUrlCache.delete && imageUrlCache.delete(key); } catch (_) { }
+        const { url } = await dbService.getImageUrl(key);
+        if (!url) { cell.textContent = '📷'; return; }
+        // Append a cache buster
+        const finalUrl = url + (url.includes('?') ? '&' : '?') + 'r=' + Date.now();
+        if (img) {
+            img.dataset.retried = '1';
+            img.src = finalUrl;
+            img.onerror = function () { this.onerror = null; this.parentElement.textContent = '📷'; };
+        } else {
+            cell.innerHTML = `<img id="${cellId}-img" src="${finalUrl}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;" onerror="this.onerror=null;this.parentElement.textContent='📷';"/>`;
         }
+    } catch (e) {
+        const cell = document.getElementById(cellId);
+        if (cell) cell.textContent = '📷';
+    }
+}
 
-        // Close modal
-        function closeModal() {
-            document.getElementById('product-modal').style.display = 'none';
-            document.getElementById('modal-error').innerHTML = '';
+// Apply filters to products
+function applyFilters(products) {
+    const term = (searchTerm || '').trim().toLowerCase();
+    return products.filter(product => {
+        // Text search filter (name or barcode)
+        if (term) {
+            const name = (product.name || '').toLowerCase();
+            const barcode = (product.barcode || '').toLowerCase();
+            if (!name.includes(term) && !barcode.includes(term)) return false;
         }
+        return true;
+    });
+}
 
-        // Publish changes (placeholder function)
-        function publishChanges() {
-            showSuccess('Changes published successfully!');
-        }
+// Toggle filter
+function toggleFilter(filterType) {
+    const checkbox = document.getElementById(filterType + '-checkbox');
+    filters[filterType] = !filters[filterType];
 
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const modal = document.getElementById('product-modal');
-            if (event.target === modal) {
-                closeModal();
-            }
-        }
+    if (filters[filterType]) {
+        checkbox.classList.add('active');
+    } else {
+        checkbox.classList.remove('active');
+    }
 
-        // =====================
-        // Image picker controls
-        // =====================
+    renderProducts();
+}
 
-        function resetImages() {
-            // Revoke any existing URLs
-            selectedImages.forEach(img => { if (img && img.url) URL.revokeObjectURL(img.url); });
-            selectedImages = [null, null];
-            carouselIndex = 0;
-            updateCarouselUI();
-        }
+// Show/hide loading
+function showLoading(show) {
+    document.getElementById('loading').style.display = show ? 'block' : 'none';
+    document.getElementById('products-table').style.display = show ? 'none' : 'table';
+}
 
-        function onSelectImage(e, idx) {
-            const file = e.target.files && e.target.files[0];
-            if (!file) return;
+// Show error message
+function showError(message) {
+    const errorDiv = document.getElementById('error-message');
+    errorDiv.innerHTML = `<div class="error">${message}</div>`;
+    setTimeout(() => {
+        errorDiv.innerHTML = '';
+    }, 5000);
+}
 
-            const url = URL.createObjectURL(file);
-            const img = new Image();
-            img.onload = () => {
-                const w = img.naturalWidth;
-                const h = img.naturalHeight;
-                // Validate minimum resolution 760x600
-                if (w < 760 || h < 600) {
-                    URL.revokeObjectURL(url);
-                    e.target.value = '';
-                    const modalError = document.getElementById('modal-error');
-                    modalError.innerHTML = `<div class="error">Image is too small (${w}×${h}). Minimum is 760×600.</div>`;
-                    return;
-                }
-                // Accept any image format per user instruction
-                selectedImages[idx] = { file, url, width: w, height: h };
-                // Set carousel to first available image (main = first slot if present)
-                const firstIdx = selectedImages.findIndex(x => !!x);
-                carouselIndex = firstIdx >= 0 ? firstIdx : 0;
+// Show success message
+function showSuccess(message) {
+    const errorDiv = document.getElementById('error-message');
+    errorDiv.innerHTML = `<div class="success">${message}</div>`;
+    setTimeout(() => {
+        errorDiv.innerHTML = '';
+    }, 3000);
+}
+
+// =====================
+// Search controls
+// =====================
+function onSearchInput(e) {
+    searchTerm = e.target.value || '';
+    renderProducts();
+}
+
+function clearSearch() {
+    searchTerm = '';
+    const input = document.getElementById('product-search');
+    if (input) input.value = '';
+    renderProducts();
+}
+
+// Open add product modal
+function openAddProductModal() {
+    currentEditingId = null;
+    document.getElementById('modal-title').textContent = 'Add Product';
+    document.getElementById('product-form').reset();
+    document.getElementById('product-modal').style.display = 'block';
+    const unitEl = document.getElementById('product-price-unit');
+    if (unitEl) unitEl.value = 'piece';
+    const areaEl = document.getElementById('product-area');
+    if (areaEl) areaEl.value = 'A1';
+    const scaleEl = document.getElementById('product-scale-need');
+    if (scaleEl) scaleEl.checked = false;
+    // reset images
+    resetImages();
+    existingImageKeys = [null, null];
+    deleteKeys = [];
+    clearSuggestedImages();
+    attachSuggestionAutoRefresh();
+}
+
+// Edit product
+function editProduct(id) {
+    const product = products.find(p => p.id === id);
+    if (product) {
+        currentEditingId = id;
+        document.getElementById('modal-title').textContent = 'Edit Product';
+        document.getElementById('product-name').value = product.name;
+        document.getElementById('product-description').value = product.description;
+        document.getElementById('product-category').value = product.category;
+        document.getElementById('product-price').value = product.price;
+        const unitEl = document.getElementById('product-price-unit');
+        if (unitEl) unitEl.value = product.priceUnit || 'piece';
+        document.getElementById('product-barcode').value = product.barcode;
+        document.getElementById('product-availability').value = product.availability;
+        const areaEl = document.getElementById('product-area');
+        if (areaEl) areaEl.value = product.areaLocation || 'A1';
+        const scaleEl = document.getElementById('product-scale-need');
+        if (scaleEl) scaleEl.checked = product.scaleNeed === true;
+        document.getElementById('product-modal').style.display = 'block';
+        resetImages();
+        clearSuggestedImages();
+        attachSuggestionAutoRefresh();
+        // Load persisted images (up to 2) as existing
+        const keys = Array.isArray(product.imageKeys) ? product.imageKeys : (product.image_keys || []);
+        existingImageKeys = [keys[0] || null, keys[1] || null];
+        deleteKeys = [];
+        keys.forEach((k, idx) => {
+            if (!k) return;
+            dbService.getImageUrl(k).then(({ url }) => {
+                if (!url) return;
+                selectedImages[idx] = { file: null, url, width: 0, height: 0, key: k, existing: true };
                 updateCarouselUI();
-            };
-            img.onerror = () => {
-                URL.revokeObjectURL(url);
-                e.target.value = '';
-                const modalError = document.getElementById('modal-error');
-                modalError.innerHTML = `<div class="error">Unsupported image file.</div>`;
-            };
-            img.src = url;
-        }
-
-        function removeImage(idx) {
-            const input = document.getElementById(`file-${idx}`);
-            if (selectedImages[idx] && selectedImages[idx].url) {
-                URL.revokeObjectURL(selectedImages[idx].url);
+            }).catch(() => {/* ignore */ });
+        });
+        // Auto-trigger suggestions for this product using its current name/category
+        // Delay slightly to ensure DOM is fully updated
+        setTimeout(() => {
+            // Only trigger if a name or category exist
+            const hasName = (document.getElementById('product-name')?.value || '').trim().length > 0;
+            const hasCat = (document.getElementById('product-category')?.value || '').trim().length > 0;
+            if (hasName || hasCat) {
+                suggestImagesForCurrentProduct();
             }
-            // If removing an existing persisted image, track it for backend deletion
-            const toRemove = selectedImages[idx];
-            if (toRemove && toRemove.existing && toRemove.key) {
-                deleteKeys = deleteKeys || [];
-                if (!deleteKeys.includes(toRemove.key)) deleteKeys.push(toRemove.key);
+        }, 50);
+    }
+}
+
+// Save product (uploads images first to S3, then persists product with imageKeys)
+async function saveProduct() {
+    try {
+        const formData = {
+            name: document.getElementById('product-name').value,
+            description: document.getElementById('product-description').value,
+            category: document.getElementById('product-category').value,
+            price: parseFloat(document.getElementById('product-price').value),
+            priceUnit: (document.getElementById('product-price-unit') && document.getElementById('product-price-unit').value) || 'piece',
+            barcode: document.getElementById('product-barcode').value,
+            availability: document.getElementById('product-availability').value,
+            areaLocation: (document.getElementById('product-area') && document.getElementById('product-area').value) || 'A1',
+            scaleNeed: (document.getElementById('product-scale-need') && document.getElementById('product-scale-need').checked) === true
+        };
+
+        if (currentEditingId) {
+            formData.id = currentEditingId;
+        }
+
+        // Upload new images to S3 per slot and track uploadedKey on selectedImages entries
+        for (let i = 0; i < selectedImages.length; i++) {
+            const sel = selectedImages[i];
+            if (!sel || !sel.file) continue; // only new files get uploaded
+            const file = sel.file;
+            const contentType = file.type || 'application/octet-stream';
+            const { uploadUrl, key } = await dbService.getUploadUrl({
+                fileName: file.name,
+                contentType,
+                productId: currentEditingId || undefined
+            });
+            const putResp = await fetch(uploadUrl, {
+                method: 'PUT',
+                headers: { 'Content-Type': contentType },
+                body: file
+            });
+            if (!putResp.ok) {
+                const t = await putResp.text();
+                throw new Error(`Image upload failed (${putResp.status}): ${t}`);
             }
-            selectedImages[idx] = null;
-            if (input) input.value = '';
-
-            // Move carousel to next available image
-            const available = getAvailableIndices();
-            carouselIndex = available.length ? available[0] : 0;
-            updateCarouselUI();
+            selectedImages[i].uploadedKey = key;
         }
 
-        function getAvailableIndices() {
-            const indices = [];
-            if (selectedImages[0]) indices.push(0);
-            if (selectedImages[1]) indices.push(1);
-            return indices;
+        // Build final imageKeys list in slot order (0..1), using existing keys for kept images and uploadedKey for new ones
+        const finalKeys = [];
+        for (let i = 0; i < selectedImages.length; i++) {
+            const sel = selectedImages[i];
+            if (!sel) continue;
+            if (sel.existing && sel.key) finalKeys.push(sel.key);
+            else if (sel.uploadedKey) finalKeys.push(sel.uploadedKey);
         }
 
-        function carouselPrev() {
-            const indices = getAvailableIndices();
-            if (indices.length <= 1) return;
-            const pos = indices.indexOf(carouselIndex);
-            const nextPos = (pos - 1 + indices.length) % indices.length;
-            carouselIndex = indices[nextPos];
-            updateCarouselUI();
-        }
+        // Always send imageKeys (even if empty) so backend can clear images if needed
+        formData.imageKeys = finalKeys;
+        if (currentEditingId && deleteKeys.length > 0) formData.deleteKeys = deleteKeys;
 
- 
+        await dbService.putProduct(formData);
+        // Clear cached signed URLs for deleted keys to prevent stale thumbnails
+        if (Array.isArray(deleteKeys)) {
+            for (const k of deleteKeys) {
+                try { imageUrlCache.delete(k); } catch (_) { }
+            }
+        }
+        closeModal();
+        showSuccess(currentEditingId ? 'Product updated successfully!' : 'Product added successfully!');
+        loadProducts();
+    } catch (error) {
+        const modalError = document.getElementById('modal-error');
+        modalError.innerHTML = `<div class="error">Failed to save product: ${error.message}</div>`;
+    }
+}
 
 // Delete product
 async function deleteProduct(id) {
@@ -1258,7 +1143,122 @@ function publishChanges() {
 }
 
 // Close modal when clicking outside
-window.onclick = function(event) {
+window.onclick = function (event) {
+    const modal = document.getElementById('product-modal');
+    if (event.target === modal) {
+        closeModal();
+    }
+}
+
+// =====================
+// Image picker controls
+// =====================
+
+function resetImages() {
+    // Revoke any existing URLs
+    selectedImages.forEach(img => { if (img && img.url) URL.revokeObjectURL(img.url); });
+    selectedImages = [null, null];
+    carouselIndex = 0;
+    updateCarouselUI();
+}
+
+function onSelectImage(e, idx) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        // Validate minimum resolution 760x600
+        if (w < 760 || h < 600) {
+            URL.revokeObjectURL(url);
+            e.target.value = '';
+            const modalError = document.getElementById('modal-error');
+            modalError.innerHTML = `<div class="error">Image is too small (${w}×${h}). Minimum is 760×600.</div>`;
+            return;
+        }
+        // Accept any image format per user instruction
+        selectedImages[idx] = { file, url, width: w, height: h };
+        // Set carousel to first available image (main = first slot if present)
+        const firstIdx = selectedImages.findIndex(x => !!x);
+        carouselIndex = firstIdx >= 0 ? firstIdx : 0;
+        updateCarouselUI();
+    };
+    img.onerror = () => {
+        URL.revokeObjectURL(url);
+        e.target.value = '';
+        const modalError = document.getElementById('modal-error');
+        modalError.innerHTML = `<div class="error">Unsupported image file.</div>`;
+    };
+    img.src = url;
+}
+
+function removeImage(idx) {
+    const input = document.getElementById(`file-${idx}`);
+    if (selectedImages[idx] && selectedImages[idx].url) {
+        URL.revokeObjectURL(selectedImages[idx].url);
+    }
+    // If removing an existing persisted image, track it for backend deletion
+    const toRemove = selectedImages[idx];
+    if (toRemove && toRemove.existing && toRemove.key) {
+        deleteKeys = deleteKeys || [];
+        if (!deleteKeys.includes(toRemove.key)) deleteKeys.push(toRemove.key);
+    }
+    selectedImages[idx] = null;
+    if (input) input.value = '';
+
+    // Move carousel to next available image
+    const available = getAvailableIndices();
+    carouselIndex = available.length ? available[0] : 0;
+    updateCarouselUI();
+}
+
+function getAvailableIndices() {
+    const indices = [];
+    if (selectedImages[0]) indices.push(0);
+    if (selectedImages[1]) indices.push(1);
+    return indices;
+}
+
+function carouselPrev() {
+    const indices = getAvailableIndices();
+    if (indices.length <= 1) return;
+    const pos = indices.indexOf(carouselIndex);
+    const nextPos = (pos - 1 + indices.length) % indices.length;
+    carouselIndex = indices[nextPos];
+    updateCarouselUI();
+}
+
+
+
+// Delete product
+async function deleteProduct(id) {
+    if (confirm('Are you sure you want to delete this product?')) {
+        try {
+            await dbService.deleteProduct(id);
+            showSuccess('Product deleted successfully!');
+            loadProducts();
+        } catch (error) {
+            showError('Failed to delete product: ' + error.message);
+        }
+    }
+}
+
+// Close modal
+function closeModal() {
+    document.getElementById('product-modal').style.display = 'none';
+    document.getElementById('modal-error').innerHTML = '';
+}
+
+// Publish changes (placeholder function)
+function publishChanges() {
+    showSuccess('Changes published successfully!');
+}
+
+// Close modal when clicking outside
+window.onclick = function (event) {
     const modal = document.getElementById('product-modal');
     if (event.target === modal) {
         closeModal();
@@ -1378,7 +1378,7 @@ function updateCarouselUI() {
     for (let i = 0; i < 2; i++) {
         const has = !!selectedImages[i];
         const active = i === carouselIndex && has;
-        dots.push(`<button type="button" class="dot ${has ? 'has' : ''} ${active ? 'active' : ''}" onclick="setCarousel(${i})" aria-label="Image ${i+1}"></button>`);
+        dots.push(`<button type="button" class="dot ${has ? 'has' : ''} ${active ? 'active' : ''}" onclick="setCarousel(${i})" aria-label="Image ${i + 1}"></button>`);
     }
     dotsEl.innerHTML = dots.join('');
 }
@@ -1440,11 +1440,11 @@ async function onCsvSelected(e) {
         }
         if (errors.length) {
             const sample = errors.slice(0, 5).map(er => `Row ${er.row}: ${er.message}`).join('<br>');
-            showError(`Some rows invalid. Importing valid rows. Errors:<br>${sample}${errors.length>5?'\n...':''}`);
+            showError(`Some rows invalid. Importing valid rows. Errors:<br>${sample}${errors.length > 5 ? '\n...' : ''}`);
         }
         if (dupErrors.length) {
             const sample = dupErrors.slice(0, 5).map(er => `Row ${er.row}: ${er.message}`).join('<br>');
-            showError(`Duplicates skipped:<br>${sample}${dupErrors.length>5?'\n...':''}`);
+            showError(`Duplicates skipped:<br>${sample}${dupErrors.length > 5 ? '\n...' : ''}`);
         }
         let success = 0; let fail = 0;
         for (let i = 0; i < filtered.length; i++) {
@@ -1481,7 +1481,7 @@ async function onCsvSelected(e) {
 function arraysEqual(a, b) {
     if (!Array.isArray(a) || !Array.isArray(b)) return false;
     if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if ((a[i]||'').trim() !== (b[i]||'').trim()) return false;
+    for (let i = 0; i < a.length; i++) if ((a[i] || '').trim() !== (b[i] || '').trim()) return false;
     return true;
 }
 
@@ -1508,7 +1508,7 @@ function parseCsvLine(line) {
         const ch = line[i];
         if (inQuotes) {
             if (ch === '"') {
-                if (i + 1 < line.length && line[i+1] === '"') { // escaped quote
+                if (i + 1 < line.length && line[i + 1] === '"') { // escaped quote
                     cur += '"';
                     i++;
                 } else {
@@ -1533,13 +1533,13 @@ function parseCsvLine(line) {
 }
 
 function validateCsvRows(rows, headerInfo) {
-    const allowedUnits = ['piece','lb','oz','g','kg','gallon','dozen','loaf','bag','bags','carton','block','jar','cup','box','pack','can','bottle'];
+    const allowedUnits = ['piece', 'lb', 'oz', 'g', 'kg', 'gallon', 'dozen', 'loaf', 'bag', 'bags', 'carton', 'block', 'jar', 'cup', 'box', 'pack', 'can', 'bottle'];
     const toImport = [];
     const errors = [];
     for (let i = 0; i < rows.length; i++) {
         const cols = rows[i];
         if (cols.length < headerInfo.count) {
-            errors.push({ row: i+2, message: `Expected at least ${headerInfo.count} columns, got ${cols.length}` });
+            errors.push({ row: i + 2, message: `Expected at least ${headerInfo.count} columns, got ${cols.length}` });
             continue;
         }
         const obj = {};
@@ -1548,7 +1548,7 @@ function validateCsvRows(rows, headerInfo) {
             const idx = headerInfo.map[key];
             obj[key] = (idx >= 0 ? cols[idx] : '');
         }
-        const required = ['name','description','category','price','barcode','availability'];
+        const required = ['name', 'description', 'category', 'price', 'barcode', 'availability'];
         let bad = null;
         for (const k of required) {
             if (obj[k] === undefined || obj[k] === null || String(obj[k]).trim() === '') { bad = `${k} is required`; break; }
@@ -1566,7 +1566,7 @@ function validateCsvRows(rows, headerInfo) {
             else obj.priceUnit = unit;
         }
         if (bad) {
-            errors.push({ row: i+2, message: bad });
+            errors.push({ row: i + 2, message: bad });
             continue;
         }
         obj.__row = i + 2; // preserve original row for later messages
@@ -1579,15 +1579,15 @@ function validateCsvRows(rows, headerInfo) {
 function buildHeaderMap(headers) {
     const canon = name => name.toLowerCase().replace(/[_\s]+/g, '');
     const synonyms = {
-        name: ['name','product','productname'],
-        description: ['description','desc','details'],
-        availability: ['availability','status','stock'],
-        barcode: ['barcode','sku','code','upc','ean'],
-        category: ['category','cat','type'],
-        price: ['price','amount','cost'],
-        priceUnit: ['priceunit','unit','uom','price_unit','per','perunit']
+        name: ['name', 'product', 'productname'],
+        description: ['description', 'desc', 'details'],
+        availability: ['availability', 'status', 'stock'],
+        barcode: ['barcode', 'sku', 'code', 'upc', 'ean'],
+        category: ['category', 'cat', 'type'],
+        price: ['price', 'amount', 'cost'],
+        priceUnit: ['priceunit', 'unit', 'uom', 'price_unit', 'per', 'perunit']
     };
-    const required = ['name','description','availability','barcode','category','price','priceUnit'];
+    const required = ['name', 'description', 'availability', 'barcode', 'category', 'price', 'priceUnit'];
     const map = {};
     for (let i = 0; i < headers.length; i++) {
         const h = canon(headers[i] || '');
@@ -1605,8 +1605,8 @@ function buildHeaderMap(headers) {
 function normalizeAvailability(val) {
     const v = (val || '').toString().trim().toLowerCase();
     if (!v) return '';
-    const inStock = ['in stock','instock','available','yes','y','1'];
-    const outStock = ['out of stock','outofstock','out','oos','unavailable','no','n','0'];
+    const inStock = ['in stock', 'instock', 'available', 'yes', 'y', '1'];
+    const outStock = ['out of stock', 'outofstock', 'out', 'oos', 'unavailable', 'no', 'n', '0'];
     if (inStock.includes(v)) return 'In Stock';
     if (outStock.includes(v)) return 'Out of Stock';
     // Try partial matches
