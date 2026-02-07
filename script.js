@@ -1,9 +1,9 @@
 // Backend API Configuration
-const API_BASE_URL = 'https://ov07pqkx1d.execute-api.us-east-1.amazonaws.com/dev';
+const API_BASE_URL = 'https://llxccyvf20.execute-api.us-east-1.amazonaws.com/dev';
 
 // Cognito (Admin) Auth Configuration
-const COGNITO_DOMAIN = 'https://store-alibaba-inventory-dev-admin.auth.us-east-1.amazoncognito.com';
-const COGNITO_CLIENT_ID = '7lop8c4imce82rgrh9sn1mb009';
+const COGNITO_DOMAIN = 'https://aliabab-inventory-v2-dev-admin.auth.us-east-1.amazoncognito.com';
+const COGNITO_CLIENT_ID = 'qt6k424dfsjk1u2p9jq7t4sdp';
 const REDIRECT_URI = 'https://fineascent.github.io/table-backend-inventory/';
 
 // Simple auth state helpers
@@ -726,7 +726,8 @@ class DynamoDBService {
             areaLocation: product.areaLocation || 'A1',
             scaleNeed: product.scaleNeed === true,
             imageKeys: Array.isArray(product.imageKeys) ? product.imageKeys : [],
-            deleteKeys: Array.isArray(product.deleteKeys) ? product.deleteKeys : undefined
+            deleteKeys: Array.isArray(product.deleteKeys) ? product.deleteKeys : undefined,
+            allergySummary: product.allergySummary
         });
         const headers = { 'Content-Type': 'application/json' };
         const token = getIdToken();
@@ -998,6 +999,8 @@ function openAddProductModal() {
     deleteKeys = [];
     clearSuggestedImages();
     attachSuggestionAutoRefresh();
+    const allergyEl = document.getElementById('product-allergy-summary');
+    if (allergyEl) allergyEl.value = '';
 }
 
 // Edit product
@@ -1018,6 +1021,8 @@ function editProduct(id) {
         if (areaEl) areaEl.value = product.areaLocation || 'A1';
         const scaleEl = document.getElementById('product-scale-need');
         if (scaleEl) scaleEl.checked = product.scaleNeed === true;
+        const allergyEl = document.getElementById('product-allergy-summary');
+        if (allergyEl) allergyEl.value = product.allergySummary || '';
         document.getElementById('product-modal').style.display = 'block';
         resetImages();
         clearSuggestedImages();
@@ -1059,7 +1064,8 @@ async function saveProduct() {
             barcode: document.getElementById('product-barcode').value,
             availability: document.getElementById('product-availability').value,
             areaLocation: (document.getElementById('product-area') && document.getElementById('product-area').value) || 'A1',
-            scaleNeed: (document.getElementById('product-scale-need') && document.getElementById('product-scale-need').checked) === true
+            scaleNeed: (document.getElementById('product-scale-need') && document.getElementById('product-scale-need').checked) === true,
+            allergySummary: document.getElementById('product-allergy-summary') ? document.getElementById('product-allergy-summary').value : ''
         };
 
         if (currentEditingId) {
@@ -1657,3 +1663,141 @@ function cleanPrice(val) {
 // Expose CSV handlers for inline HTML attributes
 window.triggerCsvPick = triggerCsvPick;
 window.onCsvSelected = onCsvSelected;
+
+// =====================
+// AI Allergies
+// =====================
+
+function getOpenAIKey() {
+    return window.localStorage.getItem('openai_api_key') || '';
+}
+
+function setOpenAIKey(key) {
+    if (key) window.localStorage.setItem('openai_api_key', key.trim());
+}
+
+async function ensureOpenAIKeyOrPrompt() {
+    let key = getOpenAIKey();
+    if (!key) {
+        key = window.prompt('Enter your OpenAI API key (for GPT-4o-mini) to detect allergies:', '');
+        if (key && key.trim()) {
+            setOpenAIKey(key.trim());
+        }
+    }
+    return getOpenAIKey();
+}
+
+async function checkAllergiesForProduct(product, apiKey) {
+    try {
+        const prompt = `
+Product Name: ${product.name}
+Description: ${product.description}
+Category: ${product.category}
+Price: ${product.price} ${product.priceUnit}
+Availability: ${product.availability}
+
+Analyze the above product information and identify any accurate possible allergies that the item may include or cause interactions.
+If you find NO significant possible action/reaction related to the item, output exactly "none".
+If you find potential allergies, provide a short text summary.
+Output format: Just the summary text or "none". Keep it concise.
+        `.trim();
+
+        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-4o-mini',
+                messages: [
+                    { role: 'system', content: 'You are a helpful assistant that identifies allergens in grocery products.' },
+                    { role: 'user', content: prompt }
+                ],
+                max_tokens: 150
+            })
+        });
+
+        if (!resp.ok) {
+            const t = await resp.text();
+            console.warn('OpenAI error:', t);
+            return null;
+        }
+
+        const data = await resp.json();
+        const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+        if (!content) return null;
+
+        const clean = content.trim().replace(/^"|"$/g, '');
+        if (clean.toLowerCase() === 'none') return 'none';
+        return clean;
+    } catch (e) {
+        console.warn('checkAllergiesForProduct failed', e);
+        return null;
+    }
+}
+
+async function autoAssignAllergiesForAll() {
+    try {
+        const apiKey = await ensureOpenAIKeyOrPrompt();
+        if (!apiKey) {
+            showError('OpenAI API Key required.');
+            return;
+        }
+
+        showLoading(true);
+        let updated = 0;
+        let skipped = 0;
+
+        // Refresh products
+        if (!products || !products.length) {
+            await loadProducts();
+        }
+
+        for (const p of products) {
+            // Skip if already has allergy info that isn't empty/none?
+            // If it is 'none', we might want to re-check if we are running this explicitly?
+            // Let's assume we skip only if we have a real summary.
+            // Actually, if user clicks the button, maybe they want to fill in gaps.
+            if (p.allergySummary && p.allergySummary !== 'none' && p.allergySummary.length > 5) {
+                skipped++;
+                continue;
+            }
+
+            const summary = await checkAllergiesForProduct(p, apiKey);
+            if (!summary) {
+                skipped++;
+                continue;
+            }
+
+            // Save if different
+            if (summary !== p.allergySummary) {
+                try {
+                    await dbService.putProduct({
+                        ...p,
+                        allergySummary: summary,
+                        // Ensure existing images/fields are preserved
+                        imageKeys: p.imageKeys || [],
+                        deleteKeys: [] // explicit empty to avoid issues
+                    });
+                    updated++;
+                } catch (err) {
+                    console.warn('putProduct failed saving allergies', err);
+                }
+            } else {
+                skipped++;
+            }
+        }
+
+        await loadProducts();
+        showSuccess(`Allergy detection complete. Updated: ${updated}, Skipped/Unchanged: ${skipped}`);
+
+    } catch (err) {
+        showError('Auto detect allergies failed: ' + err.message);
+    } finally {
+        showLoading(false);
+    }
+}
+
+// Expose
+window.autoAssignAllergiesForAll = autoAssignAllergiesForAll;

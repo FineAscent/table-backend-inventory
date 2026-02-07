@@ -27,11 +27,11 @@ function validate(body) {
   if (typeof body.price !== 'number' || Number.isNaN(body.price)) return 'price must be a number';
   if (!['In Stock', 'Out of Stock'].includes(body.availability)) return 'availability must be In Stock or Out of Stock';
   if (body.priceUnit !== undefined) {
-    const allowed = ['piece','lb','oz','g','kg','gallon','dozen','loaf','bag','bags','carton','block','jar','cup','box','pack','can','bottle'];
+    const allowed = ['piece', 'lb', 'oz', 'g', 'kg', 'gallon', 'dozen', 'loaf', 'bag', 'bags', 'carton', 'block', 'jar', 'cup', 'box', 'pack', 'can', 'bottle'];
     if (!allowed.includes(body.priceUnit)) return 'priceUnit must be one of ' + allowed.join(', ');
   }
   if (body.areaLocation !== undefined) {
-    const areas = ['A1','A2','A3','A4','A5','A6','A7','A8','A9','A10'];
+    const areas = ['A1', 'A2', 'A3', 'A4', 'A5', 'A6', 'A7', 'A8', 'A9', 'A10'];
     if (!areas.includes(body.areaLocation)) return 'areaLocation must be one of ' + areas.join(', ');
   }
   if (body.imageKeys !== undefined) {
@@ -102,7 +102,8 @@ exports.handler = async (event) => {
       gsi1_pk: body.availability,
       gsi1_sk: now,
       gsi2_pk: body.barcode,
-      imageKeys: Array.isArray(body.imageKeys) ? body.imageKeys : []
+      imageKeys: Array.isArray(body.imageKeys) ? body.imageKeys : [],
+      allergySummary: body.allergySummary || 'none'
     };
 
     await ddb.put({ TableName: TABLE_NAME, Item: item, ConditionExpression: 'attribute_not_exists(id)' }).promise();
