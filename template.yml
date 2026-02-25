@@ -13,6 +13,11 @@ Globals:
         TABLE_NAME: !Ref InventoryTable
         BUCKET_NAME: !Ref ImageBucket
         DEFAULT_PAGE_SIZE: 50
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization,X-Api-Key'"
+      AllowOrigin: "'*'"
 
 Resources:
   # DynamoDB Table
