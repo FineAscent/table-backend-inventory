@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: 'Inventory backend with DynamoDB, S3 for images, and Node.js Lambdas
+
+  '
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Timeout: 10
+    MemorySize: 128
+    Environment:
+      Variables:
+        TABLE_NAME:
+          Ref: InventoryTable
+        BUCKET_NAME:
+          Ref: ImageBucket
+        DEFAULT_PAGE_SIZE: 50
+Resources:
+  InventoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+      - AttributeName: id
+        AttributeType: S
+      - AttributeName: gsi1_pk
+        AttributeType: S
+      - AttributeName: gsi1_sk
+        AttributeType: S
+      - AttributeName: gsi2_pk
+        AttributeType: S
+      KeySchema:
+      - AttributeName: id
+        KeyType: HASH
+      GlobalSecondaryIndexes:
+      - IndexName: GSI1
+        KeySchema:
+        - AttributeName: gsi1_pk
+          KeyType: HASH
+        - AttributeName: gsi1_sk
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+      - IndexName: GSI2
+        KeySchema:
+        - AttributeName: gsi2_pk
+          KeyType: HASH
+        Projection:
+          ProjectionType: ALL
+      BillingMode: PAY_PER_REQUEST
+  ImageBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      CorsConfiguration:
+        CorsRules:
+        - AllowedHeaders:
+          - '*'
+          AllowedMethods:
+          - GET
+          - PUT
+          - POST
+          - DELETE
+          - HEAD
+          AllowedOrigins:
+          - '*'
+          MaxAge: 3000
+  ListFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ListFunction
+      Handler: list.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: InventoryTable
+      Events:
+        ListProducts:
+          Type: Api
+          Properties:
+            Path: /products
+            Method: get
+    Metadata:
+      SamResourceId: ListFunction
+  CreateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: CreateFunction
+      Handler: create.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: InventoryTable
+      Events:
+        CreateProduct:
+          Type: Api
+          Properties:
+            Path: /products
+            Method: post
+    Metadata:
+      SamResourceId: CreateFunction
+  GetProductFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetProductFunction
+      Handler: get.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: InventoryTable
+      Events:
+        GetProduct:
+          Type: Api
+          Properties:
+            Path: /products/{id}
+            Method: get
+    Metadata:
+      SamResourceId: GetProductFunction
+  UpdateFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: UpdateFunction
+      Handler: update.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: InventoryTable
+      Events:
+        UpdateProduct:
+          Type: Api
+          Properties:
+            Path: /products/{id}
+            Method: put
+    Metadata:
+      SamResourceId: UpdateFunction
+  DeleteFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: DeleteFunction
+      Handler: delete.handler
+      Policies:
+      - DynamoDBCrudPolicy:
+          TableName:
+            Ref: InventoryTable
+      - S3CrudPolicy:
+          BucketName:
+            Ref: ImageBucket
+      Events:
+        DeleteProduct:
+          Type: Api
+          Properties:
+            Path: /products/{id}
+            Method: delete
+    Metadata:
+      SamResourceId: DeleteFunction
+  GetUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetUploadUrlFunction
+      Handler: upload_url.handler
+      Policies:
+      - S3CrudPolicy:
+          BucketName:
+            Ref: ImageBucket
+      Events:
+        GetUploadUrl:
+          Type: Api
+          Properties:
+            Path: /upload-url
+            Method: post
+    Metadata:
+      SamResourceId: GetUploadUrlFunction
+  GetImageUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: GetImageUrlFunction
+      Handler: get_image_url.handler
+      Policies:
+      - S3ReadPolicy:
+          BucketName:
+            Ref: ImageBucket
+      Events:
+        GetImageUrl:
+          Type: Api
+          Properties:
+            Path: /image-url
+            Method: post
+    Metadata:
+      SamResourceId: GetImageUrlFunction
+  BarcodeLookupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: BarcodeLookupFunction
+      Handler: barcode_lookup.handler
+      Timeout: 15
+      Events:
+        BarcodeLookup:
+          Type: Api
+          Properties:
+            Path: /barcode-lookup
+            Method: post
+    Metadata:
+      SamResourceId: BarcodeLookupFunction
+Outputs:
+  ApiUrl:
+    Description: API Gateway endpoint URL for Prod stage
+    Value:
+      Fn::Sub: https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/
+  InventoryTable:
+    Description: DynamoDB Table
+    Value:
+      Ref: InventoryTable
+  ImageBucket:
+    Description: S3 Bucket for Images
+    Value:
+      Ref: ImageBucket

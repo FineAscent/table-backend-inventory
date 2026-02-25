@@ -1,0 +1,13 @@
+{
+  "name": "aliabab-inventory-backend",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Lambda handlers for AliBaba inventory",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1488.0"
+  }
+}
