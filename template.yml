@@ -182,6 +182,20 @@ Resources:
             Path: /barcode-lookup
             Method: post
 
+  ImageProxyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/
+      Handler: image_proxy.handler
+      Timeout: 15
+      MemorySize: 256
+      Events:
+        ImageProxy:
+          Type: Api
+          Properties:
+            Path: /image-proxy
+            Method: post
+
   # Explicit OPTIONS handlers if needed by API Gateway to pass checks,
   # though usually the 'Cors' property on API or Function can handle it.
   # The lambda code itself handles OPTIONS so we just need the traffic to reach it.

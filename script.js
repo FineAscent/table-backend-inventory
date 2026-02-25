@@ -1,5 +1,5 @@
 // Backend API Configuration
-const API_BASE_URL = 'https://llxccyvf20.execute-api.us-east-1.amazonaws.com/dev';
+const API_BASE_URL = 'https://q5mv3u14v5.execute-api.us-east-1.amazonaws.com/Prod';
 
 // Cognito (Admin) Auth Configuration
 const COGNITO_DOMAIN = 'https://aliabab-inventory-v2-dev-admin.auth.us-east-1.amazoncognito.com';
@@ -682,23 +682,59 @@ function parseBarcodeLookupResult(apiProduct) {
 }
 
 // Download an image URL as a File object for the image picker
-// Uses multiple fallback strategies to handle CORS restrictions
+// Tries direct fetch first, then falls back to Lambda image proxy to bypass CORS
 async function downloadImageAsFile(imageUrl, fileName) {
     const safeName = (fileName || 'barcode-image').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) + '.jpg';
 
-    // Strategy 1: Direct fetch with CORS
+    // Strategy 1: Direct fetch with CORS (fast path — works if CDN allows it)
     try {
         const resp = await fetch(imageUrl, { mode: 'cors' });
         if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
         const blob = await resp.blob();
         const processed = await renderToFixedCanvasJpeg(blob, 760, 600, 0.9);
         if (!processed) throw new Error('Image processing failed');
+        console.log('downloadImageAsFile: direct fetch succeeded');
         return new File([processed], safeName, { type: 'image/jpeg' });
     } catch (e) {
-        console.warn('downloadImageAsFile: direct fetch failed, trying img+canvas fallback:', e.message);
+        console.warn('downloadImageAsFile: direct fetch failed, trying Lambda proxy:', e.message);
     }
 
-    // Strategy 2: Load via <img crossOrigin="anonymous"> + draw to canvas
+    // Strategy 2: Lambda image proxy (downloads server-side, returns base64 — bypasses CORS entirely)
+    try {
+        const proxyUrl = `${API_BASE_URL}/image-proxy`;
+        const headers = { 'Content-Type': 'application/json' };
+        const token = getIdToken();
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const resp = await fetch(proxyUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ url: imageUrl })
+        });
+
+        if (!resp.ok) {
+            const t = await resp.text().catch(() => '');
+            throw new Error(`Proxy returned ${resp.status}: ${t}`);
+        }
+
+        const data = await resp.json();
+        if (!data.dataUrl) throw new Error('No dataUrl in proxy response');
+
+        // Convert data URL to blob
+        const dataResp = await fetch(data.dataUrl);
+        const blob = await dataResp.blob();
+
+        // Process to standardized 760x600 JPEG
+        const processed = await renderToFixedCanvasJpeg(blob, 760, 600, 0.9);
+        if (!processed) throw new Error('Image processing after proxy failed');
+
+        console.log('downloadImageAsFile: Lambda proxy succeeded');
+        return new File([processed], safeName, { type: 'image/jpeg' });
+    } catch (e2) {
+        console.warn('downloadImageAsFile: Lambda proxy failed:', e2.message);
+    }
+
+    // Strategy 3: Load via <img crossOrigin="anonymous"> + draw to canvas (last resort)
     try {
         const blob = await new Promise((resolve, reject) => {
             const img = new Image();
@@ -728,43 +764,10 @@ async function downloadImageAsFile(imageUrl, fileName) {
             img.onerror = () => reject(new Error('img load failed'));
             img.src = imageUrl;
         });
-        if (blob) return new File([blob], safeName, { type: 'image/jpeg' });
-    } catch (e2) {
-        console.warn('downloadImageAsFile: img+canvas crossOrigin failed, trying without crossOrigin:', e2.message);
-    }
-
-    // Strategy 3: Load via <img> without crossOrigin (some servers reject anonymous)
-    // Then draw on canvas — may hit tainted canvas, but worth trying
-    try {
-        const blob = await new Promise((resolve, reject) => {
-            const img = new Image();
-            // No crossOrigin attribute
-            img.onload = () => {
-                try {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = 760;
-                    canvas.height = 600;
-                    const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(0, 0, 760, 600);
-                    const iw = img.naturalWidth || img.width;
-                    const ih = img.naturalHeight || img.height;
-                    const scale = Math.min(760 / iw, 600 / ih);
-                    const dw = Math.floor(iw * scale);
-                    const dh = Math.floor(ih * scale);
-                    const dx = Math.floor((760 - dw) / 2);
-                    const dy = Math.floor((600 - dh) / 2);
-                    ctx.imageSmoothingQuality = 'high';
-                    ctx.drawImage(img, dx, dy, dw, dh);
-                    canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/jpeg', 0.9);
-                } catch (err) {
-                    reject(err);
-                }
-            };
-            img.onerror = () => reject(new Error('img load failed'));
-            img.src = imageUrl;
-        });
-        if (blob) return new File([blob], safeName, { type: 'image/jpeg' });
+        if (blob) {
+            console.log('downloadImageAsFile: img+canvas fallback succeeded');
+            return new File([blob], safeName, { type: 'image/jpeg' });
+        }
     } catch (e3) {
         console.warn('downloadImageAsFile: all strategies failed:', e3.message);
     }
