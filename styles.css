@@ -1,711 +1,1069 @@
   * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
-            color: #333;
-        }
-
-        /* Header */
-        .header {
-            background: #333;
-            color: white;
-            padding: 0 24px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-
-        .logo {
-            font-size: 24px;
-            font-weight: bold;
-        }
-
-        .header-actions {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .publish-btn {
-            background: #1890ff;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .publish-btn:hover {
-            background: #40a9ff;
-        }
-
-        .user-avatar {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: #ccc;
-            cursor: pointer;
-        }
-
-        /* Main Container */
-        .container {
-            display: flex;
-            height: calc(100vh - 60px);
-        }
-
-        /* Sidebar */
-        .sidebar {
-            width: 280px;
-            background: white;
-            border-right: 1px solid #e8e8e8;
-            overflow-y: auto;
-        }
-
-        .sidebar-section {
-            padding: 16px 0;
-            border-bottom: 1px solid #e8e8e8;
-        }
-
-        .sidebar-title {
-            font-weight: 700;
-            margin-bottom: 8px;
-            padding: 0 24px;
-            color: #333;
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-        }
-
-        .sidebar-tabs {
-            padding: 0 16px 8px 16px;
-            display: grid;
-            gap: 8px;
-        }
-
-        .tab-item {
-            text-align: left;
-            background: transparent;
-            border: 1px solid transparent;
-            border-radius: 6px;
-            padding: 10px 12px;
-            cursor: pointer;
-            color: #333;
-            font-size: 14px;
-        }
-
-        .tab-item:hover {
-            background: #f7f7f7;
-            border-color: #eee;
-        }
-
-        .tab-item.active {
-            background: #e6f4ff;
-            border-color: #91caff;
-            color: #1677ff;
-            font-weight: 600;
-        }
-
-        .filter-option {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 0;
-            cursor: pointer;
-            border-radius: 4px;
-            transition: background 0.2s;
-        }
-
-        .filter-option:hover {
-            background: #f0f0f0;
-        }
-
-        .filter-checkbox {
-            width: 18px;
-            height: 18px;
-            border: 1px solid #d9d9d9;
-            border-radius: 2px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-        }
-
-        .filter-checkbox.active {
-            background: #1890ff;
-            border-color: #1890ff;
-        }
-
-        .filter-checkbox.active::after {
-            content: '×';
-            color: white;
-            font-size: 12px;
-            font-weight: bold;
-        }
-
-        /* Main Content */
-        .main-content {
-            flex: 1;
-            background: white;
-            overflow: auto;
-        }
-
-        /* Table Container */
-        .table-container {
-            margin: 24px;
-            border: 1px solid #e8e8e8;
-            border-radius: 8px;
-            background: white;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-            overflow-x: auto; /* allow horizontal scroll if columns overflow */
-        }
-
-        /* Table Header Actions */
-        .table-header {
-            padding: 16px 24px;
-            border-bottom: 1px solid #e8e8e8;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        /* Search Bar */
-        .search-bar {
-            padding: 12px 24px 0 24px;
-        }
-
-        .search-input-wrap {
-            display: grid;
-            grid-template-columns: 28px 1fr 28px;
-            align-items: center;
-            width: 100%;
-            background: #fff;
-            border: 1px solid #d9d9d9;
-            border-radius: 8px;
-            padding: 6px 8px;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-        }
-
-        .search-icon {
-            display: grid;
-            place-items: center;
-            color: #888;
-            font-size: 14px;
-        }
-
-        .search-input {
-            width: 100%;
-            font-size: 14px;
-            border: none;
-            outline: none;
-            padding: 8px 6px;
-            color: #333;
-            background: transparent;
-        }
-
-        .search-input::placeholder {
-            color: #aaa;
-        }
-
-        .search-clear {
-            background: none;
-            border: none;
-            color: #999;
-            cursor: pointer;
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-        }
-
-        .search-input-wrap:focus-within {
-            border-color: #1890ff;
-            box-shadow: 0 0 0 3px rgba(24,144,255,0.15);
-        }
-
-        .search-clear:hover {
-            background: #f5f5f5;
-            color: #666;
-        }
-
-        .add-product-btn {
-            background: #52c41a;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .add-product-btn:hover {
-            background: #73d13d;
-        }
-
-        /* Table */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 980px; /* ensure all columns have room; scroll on narrow screens */
-        }
-
-        th, td {
-            padding: 12px 16px;
-            text-align: left;
-            border-bottom: 1px solid #e8e8e8;
-        }
-
-        th {
-            background: #fafafa;
-            font-weight: 600;
-            color: #333;
-            font-size: 14px;
-        }
-
-        td {
-            font-size: 14px;
-            color: #666;
-        }
-
-        /* Compact width for Area column (7th column) */
-        #products-table th:nth-child(7),
-        #products-table td:nth-child(7) {
-            width: 80px;
-            white-space: nowrap;
-        }
-
-        .product-image {
-            width: 168px;
-            height: 133px;
-            background: #f0f0f0;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #999;
-            overflow: hidden;
-        }
-
-        /* Ensure table thumbnails fully fill the image box */
-        .product-image img,
-        .product-image > img,
-        .product-image img[style] {
-            width: 100% !important;
-            height: 100% !important;
-            max-width: none !important;
-            max-height: none !important;
-            object-fit: cover;
-            object-position: center;
-            display: block;
-            border-radius: 0 !important; /* rely on container rounding */
-        }
-
-        .product-name {
-            font-weight: 500;
-            color: #333;
-        }
-
-        .status-badge {
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-        }
-
-        .status-in-stock {
-            background: #f6ffed;
-            color: #52c41a;
-        }
-
-        .status-out-of-stock {
-            background: #fff2f0;
-            color: #ff4d4f;
-        }
-
-        .price {
-            font-weight: 600;
-            color: #333;
-        }
-
-        .action-btn {
-            background: none;
-            border: 1px solid #d9d9d9;
-            padding: 4px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-right: 8px;
-            font-size: 12px;
-        }
-
-        .action-btn:hover {
-            border-color: #1890ff;
-            color: #1890ff;
-        }
-
-        .delete-btn {
-            color: #ff4d4f;
-            border-color: #ff4d4f;
-        }
-
-        .delete-btn:hover {
-            background: #fff2f0;
-        }
-
-        /* Modal */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0,0,0,0.5);
-            z-index: 1000;
-            overflow: auto; /* allow overlay to scroll on very small screens */
-        }
-
-        .modal-content {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            border-radius: 8px;
-            padding: 24px;
-            width: 500px;
-            max-width: 90vw;
-            max-height: 90vh; /* keep panel within the viewport */
-            display: flex; /* allow header, form (scroll), footer layout */
-            flex-direction: column;
-            overflow: hidden; /* confine inner scrolling to form */
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-        }
-
-        .modal-title {
-            font-size: 18px;
-            font-weight: 600;
-        }
-
-        .close-btn {
-            background: none;
-            border: none;
-            font-size: 24px;
-            cursor: pointer;
-            color: #999;
-        }
-
-        .form-group {
-            margin-bottom: 16px;
-        }
-
-        .form-label {
-            display: block;
-            margin-bottom: 4px;
-            font-weight: 500;
-            color: #333;
-        }
-
-        .form-input {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #d9d9d9;
-            border-radius: 4px;
-            font-size: 14px;
-        }
-
-        .form-input:focus {
-            outline: none;
-            border-color: #1890ff;
-            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
-        }
-
-        .form-select {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #d9d9d9;
-            border-radius: 4px;
-            background: white;
-            font-size: 14px;
-        }
-
-        /* Price + Unit selector */
-        .price-wrap {
-            display: grid;
-            grid-template-columns: 1fr 140px;
-            gap: 8px;
-            align-items: center;
-        }
-        .price-input {
-            margin: 0;
-        }
-        .price-unit-select {
-            width: 100%;
-            padding: 8px 10px;
-        }
-
-        /* Make the form scrollable when content grows */
-        #product-form {
-            overflow: auto;
-            flex: 1 1 auto;
-            min-height: 0; /* allow proper flexbox scrolling */
-            padding-right: 4px; /* avoid scrollbar overlaying content */
-        }
-
-        /* Action bar stays at the bottom of the panel; only the form scrolls */
-        .modal-actions {
-            display: flex;
-            justify-content: flex-end;
-            gap: 12px;
-            margin-top: 16px;
-            padding-top: 12px;
-            border-top: 1px solid #f0f0f0;
-            flex: 0 0 auto;
-        }
-
-        .btn-cancel {
-            background: none;
-            border: 1px solid #d9d9d9;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .btn-save {
-            background: #1890ff;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #999;
-        }
-
-        .error {
-            color: #ff4d4f;
-            background: #fff2f0;
-            padding: 8px 12px;
-            border-radius: 4px;
-            margin-bottom: 16px;
-        }
-
-        .success {
-            color: #52c41a;
-            background: #f6ffed;
-            padding: 8px 12px;
-            border-radius: 4px;
-            margin-bottom: 16px;
-        }
-
-        /* Image Picker & Carousel */
-        .image-picker {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .image-carousel {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .carousel-nav {
-            background: white;
-            border: 1px solid #d9d9d9;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            cursor: pointer;
-            display: grid;
-            place-items: center;
-        }
-
-        .carousel-viewport {
-            width: 380px;
-            height: 300px;
-            background: #fafafa;
-            border: 1px dashed #e8e8e8;
-            border-radius: 8px;
-            overflow: hidden;
-            position: relative;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .carousel-viewport img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: none;
-        }
-
-        .carousel-empty {
-            color: #999;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            width: 100%;
-            height: 100%;
-        }
-
-        .image-dots {
-            display: flex;
-            gap: 6px;
-            justify-content: center;
-        }
-
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            border: 1px solid #d9d9d9;
-            background: transparent;
-            cursor: pointer;
-        }
-        .dot.has { background: #d9d9d9; }
-        .dot.active { background: #1890ff; border-color: #1890ff; }
-
-        .image-slots {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-        }
-
-        .image-slot {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .slot-drop {
-            flex: 1;
-            background: #fafafa;
-            border: 1px dashed #d9d9d9;
-            border-radius: 6px;
-            padding: 10px 12px;
-            font-size: 14px;
-            color: #666;
-            cursor: pointer;
-            text-align: center;
-        }
-
-        .slot-remove {
-            background: none;
-            border: 1px solid #d9d9d9;
-            padding: 6px 10px;
-            border-radius: 4px;
-            cursor: pointer;
-            color: #ff4d4f;
-        }
-
-        .image-hint {
-            font-size: 12px;
-            color: #888;
-        }
-
-        /* Auth UI (Login/Logout & Signed-in label) */
-        .signed-in-msg {
-            color: #d1d5db; /* light gray on dark header */
-            font-size: 12px;
-            line-height: 1;
-            max-width: 220px;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
-        .auth-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 14px;
-            min-height: 36px;
-            border-radius: 8px;
-            border: 1px solid transparent;
-            background: #475569; /* slate-600 */
-            color: #fff;
-            font-size: 14px;
-            font-weight: 600;
-            line-height: 1.2;
-            cursor: pointer;
-            -webkit-appearance: none;
-            appearance: none;
-            transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
-        }
-
-        /* Primary emphasis for Login */
-        /* Keep login button prominently styled at all times */
-        #login-btn,
-        #login-btn.auth-btn {
-            background: #1677ff;
-            border-color: #1677ff;
-            color: #fff;
-        }
-        #login-btn:hover { background: #3c94ff; }
-        #login-btn:active { background: #0f67e6; }
-
-        /* Subtle style for Logout */
-        #logout-btn.auth-btn {
-            background: transparent;
-            border-color: rgba(255,255,255,0.35);
-            color: #e5e7eb;
-        }
-        #logout-btn.auth-btn:hover {
-            background: rgba(255,255,255,0.08);
-            border-color: rgba(255,255,255,0.55);
-            color: #fff;
-        }
-
-        .auth-btn:focus-visible {
-            outline: none;
-            box-shadow: 0 0 0 3px rgba(255,255,255,0.25);
-        }
-
-        /* Ensure header actions wrap nicely on small screens */
-        @media (max-width: 640px) {
-            .header-actions { gap: 10px; }
-            .signed-in-msg { max-width: 120px; font-size: 11px; }
-            .publish-btn { padding: 6px 10px; font-size: 13px; }
-            .auth-btn { padding: 6px 10px; font-size: 12px; }
-        }
-
-        /* Import CSV styling */
-        .import-csv-btn {
-            background: #7c3aed; /* violet-600 */
-            border: none;
-        }
-        .import-csv-btn:hover { background: #8b5cf6; }
-        .import-csv-btn:active { background: #6d28d9; }
-
-        .csv-hint {
-            margin: 8px 24px 0 24px;
-            color: #6b7280; /* gray-500 */
-            font-size: 12px;
-        }
-
-        /* Price unit select emphasis */
-        .price-unit-select {
-            background-color: #fff;
-            border-color: #cbd5e1; /* slate-300 */
-            font-weight: 600;
-        }
-        
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+  }
+
+  body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      color: #333;
+  }
+
+  /* Header */
+  .header {
+      background: #333;
+      color: white;
+      padding: 0 24px;
+      height: 60px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .logo {
+      font-size: 24px;
+      font-weight: bold;
+  }
+
+  .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+  }
+
+  .publish-btn {
+      background: #1890ff;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+  }
+
+  .publish-btn:hover {
+      background: #40a9ff;
+  }
+
+  .user-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: #ccc;
+      cursor: pointer;
+  }
+
+  /* Main Container */
+  .container {
+      display: flex;
+      height: calc(100vh - 60px);
+  }
+
+  /* Sidebar */
+  .sidebar {
+      width: 280px;
+      background: white;
+      border-right: 1px solid #e8e8e8;
+      overflow-y: auto;
+  }
+
+  .sidebar-section {
+      padding: 16px 0;
+      border-bottom: 1px solid #e8e8e8;
+  }
+
+  .sidebar-title {
+      font-weight: 700;
+      margin-bottom: 8px;
+      padding: 0 24px;
+      color: #333;
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+  }
+
+  .sidebar-tabs {
+      padding: 0 16px 8px 16px;
+      display: grid;
+      gap: 8px;
+  }
+
+  .tab-item {
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 6px;
+      padding: 10px 12px;
+      cursor: pointer;
+      color: #333;
+      font-size: 14px;
+  }
+
+  .tab-item:hover {
+      background: #f7f7f7;
+      border-color: #eee;
+  }
+
+  .tab-item.active {
+      background: #e6f4ff;
+      border-color: #91caff;
+      color: #1677ff;
+      font-weight: 600;
+  }
+
+  .filter-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 0;
+      cursor: pointer;
+      border-radius: 4px;
+      transition: background 0.2s;
+  }
+
+  .filter-option:hover {
+      background: #f0f0f0;
+  }
+
+  .filter-checkbox {
+      width: 18px;
+      height: 18px;
+      border: 1px solid #d9d9d9;
+      border-radius: 2px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+  }
+
+  .filter-checkbox.active {
+      background: #1890ff;
+      border-color: #1890ff;
+  }
+
+  .filter-checkbox.active::after {
+      content: '×';
+      color: white;
+      font-size: 12px;
+      font-weight: bold;
+  }
+
+  /* Main Content */
+  .main-content {
+      flex: 1;
+      background: white;
+      overflow: auto;
+  }
+
+  /* Table Container */
+  .table-container {
+      margin: 24px;
+      border: 1px solid #e8e8e8;
+      border-radius: 8px;
+      background: white;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+      overflow-x: auto;
+      /* allow horizontal scroll if columns overflow */
+  }
+
+  /* Table Header Actions */
+  .table-header {
+      padding: 16px 24px;
+      border-bottom: 1px solid #e8e8e8;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+  }
+
+  /* Search Bar */
+  .search-bar {
+      padding: 12px 24px 0 24px;
+  }
+
+  .search-input-wrap {
+      display: grid;
+      grid-template-columns: 28px 1fr 28px;
+      align-items: center;
+      width: 100%;
+      background: #fff;
+      border: 1px solid #d9d9d9;
+      border-radius: 8px;
+      padding: 6px 8px;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  .search-icon {
+      display: grid;
+      place-items: center;
+      color: #888;
+      font-size: 14px;
+  }
+
+  .search-input {
+      width: 100%;
+      font-size: 14px;
+      border: none;
+      outline: none;
+      padding: 8px 6px;
+      color: #333;
+      background: transparent;
+  }
+
+  .search-input::placeholder {
+      color: #aaa;
+  }
+
+  .search-clear {
+      background: none;
+      border: none;
+      color: #999;
+      cursor: pointer;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+  }
+
+  .search-input-wrap:focus-within {
+      border-color: #1890ff;
+      box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.15);
+  }
+
+  .search-clear:hover {
+      background: #f5f5f5;
+      color: #666;
+  }
+
+  .add-product-btn {
+      background: #52c41a;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+  }
+
+  .add-product-btn:hover {
+      background: #73d13d;
+  }
+
+  /* Table */
+  table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 980px;
+      /* ensure all columns have room; scroll on narrow screens */
+  }
+
+  th,
+  td {
+      padding: 12px 16px;
+      text-align: left;
+      border-bottom: 1px solid #e8e8e8;
+  }
+
+  th {
+      background: #fafafa;
+      font-weight: 600;
+      color: #333;
+      font-size: 14px;
+  }
+
+  td {
+      font-size: 14px;
+      color: #666;
+  }
+
+  /* Compact width for Area column (7th column) */
+  #products-table th:nth-child(7),
+  #products-table td:nth-child(7) {
+      width: 80px;
+      white-space: nowrap;
+  }
+
+  .product-image {
+      width: 168px;
+      height: 133px;
+      background: #f0f0f0;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #999;
+      overflow: hidden;
+  }
+
+  /* Ensure table thumbnails fully fill the image box */
+  .product-image img,
+  .product-image>img,
+  .product-image img[style] {
+      width: 100% !important;
+      height: 100% !important;
+      max-width: none !important;
+      max-height: none !important;
+      object-fit: cover;
+      object-position: center;
+      display: block;
+      border-radius: 0 !important;
+      /* rely on container rounding */
+  }
+
+  .product-name {
+      font-weight: 500;
+      color: #333;
+  }
+
+  .status-badge {
+      padding: 2px 8px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+  }
+
+  .status-in-stock {
+      background: #f6ffed;
+      color: #52c41a;
+  }
+
+  .status-out-of-stock {
+      background: #fff2f0;
+      color: #ff4d4f;
+  }
+
+  .price {
+      font-weight: 600;
+      color: #333;
+  }
+
+  .action-btn {
+      background: none;
+      border: 1px solid #d9d9d9;
+      padding: 4px 8px;
+      border-radius: 4px;
+      cursor: pointer;
+      margin-right: 8px;
+      font-size: 12px;
+  }
+
+  .action-btn:hover {
+      border-color: #1890ff;
+      color: #1890ff;
+  }
+
+  .delete-btn {
+      color: #ff4d4f;
+      border-color: #ff4d4f;
+  }
+
+  .delete-btn:hover {
+      background: #fff2f0;
+  }
+
+  /* Modal */
+  .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      overflow: auto;
+      /* allow overlay to scroll on very small screens */
+  }
+
+  .modal-content {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      border-radius: 8px;
+      padding: 24px;
+      width: 500px;
+      max-width: 90vw;
+      max-height: 90vh;
+      /* keep panel within the viewport */
+      display: flex;
+      /* allow header, form (scroll), footer layout */
+      flex-direction: column;
+      overflow: hidden;
+      /* confine inner scrolling to form */
+  }
+
+  .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+  }
+
+  .modal-title {
+      font-size: 18px;
+      font-weight: 600;
+  }
+
+  .close-btn {
+      background: none;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: #999;
+  }
+
+  .form-group {
+      margin-bottom: 16px;
+  }
+
+  .form-label {
+      display: block;
+      margin-bottom: 4px;
+      font-weight: 500;
+      color: #333;
+  }
+
+  .form-input {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #d9d9d9;
+      border-radius: 4px;
+      font-size: 14px;
+  }
+
+  .form-input:focus {
+      outline: none;
+      border-color: #1890ff;
+      box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+  }
+
+  .form-select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1px solid #d9d9d9;
+      border-radius: 4px;
+      background: white;
+      font-size: 14px;
+  }
+
+  /* Price + Unit selector */
+  .price-wrap {
+      display: grid;
+      grid-template-columns: 1fr 140px;
+      gap: 8px;
+      align-items: center;
+  }
+
+  .price-input {
+      margin: 0;
+  }
+
+  .price-unit-select {
+      width: 100%;
+      padding: 8px 10px;
+  }
+
+  /* Make the form scrollable when content grows */
+  #product-form {
+      overflow: auto;
+      flex: 1 1 auto;
+      min-height: 0;
+      /* allow proper flexbox scrolling */
+      padding-right: 4px;
+      /* avoid scrollbar overlaying content */
+  }
+
+  /* Action bar stays at the bottom of the panel; only the form scrolls */
+  .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 16px;
+      padding-top: 12px;
+      border-top: 1px solid #f0f0f0;
+      flex: 0 0 auto;
+  }
+
+  .btn-cancel {
+      background: none;
+      border: 1px solid #d9d9d9;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+  }
+
+  .btn-save {
+      background: #1890ff;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+  }
+
+  .loading {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+  }
+
+  .error {
+      color: #ff4d4f;
+      background: #fff2f0;
+      padding: 8px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+  }
+
+  .success {
+      color: #52c41a;
+      background: #f6ffed;
+      padding: 8px 12px;
+      border-radius: 4px;
+      margin-bottom: 16px;
+  }
+
+  /* Image Picker & Carousel */
+  .image-picker {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+  }
+
+  .image-carousel {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+  }
+
+  .carousel-nav {
+      background: white;
+      border: 1px solid #d9d9d9;
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+  }
+
+  .carousel-viewport {
+      width: 380px;
+      height: 300px;
+      background: #fafafa;
+      border: 1px dashed #e8e8e8;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+  }
+
+  .carousel-viewport img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: none;
+  }
+
+  .carousel-empty {
+      color: #999;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      height: 100%;
+  }
+
+  .image-dots {
+      display: flex;
+      gap: 6px;
+      justify-content: center;
+  }
+
+  .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      border: 1px solid #d9d9d9;
+      background: transparent;
+      cursor: pointer;
+  }
+
+  .dot.has {
+      background: #d9d9d9;
+  }
+
+  .dot.active {
+      background: #1890ff;
+      border-color: #1890ff;
+  }
+
+  .image-slots {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+  }
+
+  .image-slot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+  }
+
+  .slot-drop {
+      flex: 1;
+      background: #fafafa;
+      border: 1px dashed #d9d9d9;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-size: 14px;
+      color: #666;
+      cursor: pointer;
+      text-align: center;
+  }
+
+  .slot-remove {
+      background: none;
+      border: 1px solid #d9d9d9;
+      padding: 6px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+      color: #ff4d4f;
+  }
+
+  .image-hint {
+      font-size: 12px;
+      color: #888;
+  }
+
+  /* Auth UI (Login/Logout & Signed-in label) */
+  .signed-in-msg {
+      color: #d1d5db;
+      /* light gray on dark header */
+      font-size: 12px;
+      line-height: 1;
+      max-width: 220px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+  }
+
+  .auth-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 14px;
+      min-height: 36px;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      background: #475569;
+      /* slate-600 */
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.2;
+      cursor: pointer;
+      -webkit-appearance: none;
+      appearance: none;
+      transition: background 0.2s, border-color 0.2s, box-shadow 0.2s, color 0.2s;
+  }
+
+  /* Primary emphasis for Login */
+  /* Keep login button prominently styled at all times */
+  #login-btn,
+  #login-btn.auth-btn {
+      background: #1677ff;
+      border-color: #1677ff;
+      color: #fff;
+  }
+
+  #login-btn:hover {
+      background: #3c94ff;
+  }
+
+  #login-btn:active {
+      background: #0f67e6;
+  }
+
+  /* Subtle style for Logout */
+  #logout-btn.auth-btn {
+      background: transparent;
+      border-color: rgba(255, 255, 255, 0.35);
+      color: #e5e7eb;
+  }
+
+  #logout-btn.auth-btn:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.55);
+      color: #fff;
+  }
+
+  .auth-btn:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+  }
+
+  /* Ensure header actions wrap nicely on small screens */
+  @media (max-width: 640px) {
+      .header-actions {
+          gap: 10px;
+      }
+
+      .signed-in-msg {
+          max-width: 120px;
+          font-size: 11px;
+      }
+
+      .publish-btn {
+          padding: 6px 10px;
+          font-size: 13px;
+      }
+
+      .auth-btn {
+          padding: 6px 10px;
+          font-size: 12px;
+      }
+  }
+
+  /* Import CSV styling */
+  .import-csv-btn {
+      background: #7c3aed;
+      /* violet-600 */
+      border: none;
+  }
+
+  .import-csv-btn:hover {
+      background: #8b5cf6;
+  }
+
+  .import-csv-btn:active {
+      background: #6d28d9;
+  }
+
+  .csv-hint {
+      margin: 8px 24px 0 24px;
+      color: #6b7280;
+      /* gray-500 */
+      font-size: 12px;
+  }
+
+  /* Price unit select emphasis */
+  .price-unit-select {
+      background-color: #fff;
+      border-color: #cbd5e1;
+      /* slate-300 */
+      font-weight: 600;
+  }
+
+  /* ===================== */
+  /* Barcode Lookup Styles */
+  /* ===================== */
+
+  /* Barcode input + lookup button row */
+  .barcode-input-wrap {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+  }
+
+  .barcode-input-wrap .form-input {
+      flex: 1;
+  }
+
+  .barcode-lookup-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 8px 14px;
+      border: 1px solid #1890ff;
+      border-radius: 6px;
+      background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s, box-shadow 0.2s, transform 0.1s;
+  }
+
+  .barcode-lookup-btn:hover {
+      background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
+      box-shadow: 0 2px 8px rgba(24, 144, 255, 0.35);
+  }
+
+  .barcode-lookup-btn:active {
+      transform: scale(0.97);
+  }
+
+  .barcode-lookup-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+  }
+
+  .barcode-lookup-btn .lookup-icon {
+      font-size: 15px;
+  }
+
+  /* Status area below barcode input */
+  .barcode-lookup-status {
+      margin-top: 6px;
+      font-size: 13px;
+      min-height: 20px;
+      transition: opacity 0.2s;
+  }
+
+  .barcode-lookup-status:empty {
+      display: none;
+  }
+
+  .barcode-lookup-status .lookup-loading {
+      color: #1890ff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+  }
+
+  .barcode-lookup-status .lookup-loading .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid #91caff;
+      border-top-color: #1890ff;
+      border-radius: 50%;
+      animation: barcode-spin 0.6s linear infinite;
+  }
+
+  @keyframes barcode-spin {
+      to {
+          transform: rotate(360deg);
+      }
+  }
+
+  .barcode-lookup-status .lookup-success {
+      color: #52c41a;
+      font-weight: 500;
+  }
+
+  .barcode-lookup-status .lookup-error {
+      color: #ff4d4f;
+  }
+
+  .barcode-lookup-status .lookup-info {
+      color: #faad14;
+  }
+
+  /* "Add by Barcode" button in table header */
+  .barcode-scan-btn {
+      background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%) !important;
+      border: none !important;
+  }
+
+  .barcode-scan-btn:hover {
+      background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%) !important;
+  }
+
+  /* Barcode Lookup Modal (Quick-scan flow) */
+  .barcode-modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1100;
+      align-items: center;
+      justify-content: center;
+  }
+
+  .barcode-modal-overlay.open {
+      display: flex;
+  }
+
+  .barcode-modal {
+      background: #fff;
+      border-radius: 12px;
+      padding: 28px;
+      width: 440px;
+      max-width: 92vw;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.18);
+      animation: barcode-modal-in 0.2s ease-out;
+  }
+
+  @keyframes barcode-modal-in {
+      from {
+          opacity: 0;
+          transform: translateY(20px) scale(0.97);
+      }
+
+      to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+      }
+  }
+
+  .barcode-modal h3 {
+      margin: 0 0 6px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #111827;
+  }
+
+  .barcode-modal .modal-subtitle {
+      margin: 0 0 18px;
+      font-size: 13px;
+      color: #6b7280;
+  }
+
+  .barcode-modal .scan-input-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+  }
+
+  .barcode-modal .scan-input-row input {
+      flex: 1;
+      padding: 10px 14px;
+      border: 1.5px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 16px;
+      letter-spacing: 1px;
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      transition: border-color 0.2s;
+  }
+
+  .barcode-modal .scan-input-row input:focus {
+      outline: none;
+      border-color: #1890ff;
+      box-shadow: 0 0 0 3px rgba(24, 144, 255, 0.15);
+  }
+
+  .barcode-modal .scan-input-row .scan-go-btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #1890ff 0%, #096dd9 100%);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+      white-space: nowrap;
+  }
+
+  .barcode-modal .scan-input-row .scan-go-btn:hover {
+      background: linear-gradient(135deg, #40a9ff 0%, #1890ff 100%);
+      box-shadow: 0 2px 8px rgba(24, 144, 255, 0.3);
+  }
+
+  .barcode-modal .scan-input-row .scan-go-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+  }
+
+  .barcode-modal #scan-status {
+      min-height: 22px;
+      font-size: 13px;
+      margin-bottom: 12px;
+  }
+
+  .barcode-modal .scan-result-card {
+      display: none;
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 16px;
+  }
+
+  .barcode-modal .scan-result-card.show {
+      display: block;
+      animation: barcode-modal-in 0.25s ease-out;
+  }
+
+  .barcode-modal .scan-result-card .result-row {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+  }
+
+  .barcode-modal .scan-result-card .result-img {
+      width: 80px;
+      height: 80px;
+      border-radius: 8px;
+      object-fit: contain;
+      background: #fff;
+      border: 1px solid #e5e7eb;
+      flex-shrink: 0;
+  }
+
+  .barcode-modal .scan-result-card .result-info {
+      flex: 1;
+  }
+
+  .barcode-modal .scan-result-card .result-name {
+      font-size: 16px;
+      font-weight: 600;
+      color: #111827;
+      margin-bottom: 4px;
+  }
+
+  .barcode-modal .scan-result-card .result-brand {
+      font-size: 13px;
+      color: #6b7280;
+  }
+
+  .barcode-modal .scan-result-card .result-barcode {
+      font-size: 12px;
+      color: #9ca3af;
+      margin-top: 4px;
+      font-family: monospace;
+  }
+
+  .barcode-modal .scan-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+  }
+
+  .barcode-modal .scan-actions button {
+      padding: 9px 18px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s, box-shadow 0.2s;
+  }
+
+  .barcode-modal .scan-cancel-btn {
+      background: #fff;
+      border: 1px solid #d1d5db;
+      color: #374151;
+  }
+
+  .barcode-modal .scan-cancel-btn:hover {
+      background: #f3f4f6;
+  }
+
+  .barcode-modal .scan-add-btn {
+      background: #52c41a;
+      border: none;
+      color: #fff;
+  }
+
+  .barcode-modal .scan-add-btn:hover {
+      background: #73d13d;
+      box-shadow: 0 2px 8px rgba(82, 196, 26, 0.3);
+  }
+
+  .barcode-modal .scan-add-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+  }

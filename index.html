@@ -50,6 +50,8 @@
                             title="Remove all images from all products">Remove All Images</button>
                         <button class="add-product-btn" onclick="autoAssignAllergiesForAll()"
                             title="Detect allergies using AI">Auto Detect Allergies</button>
+                        <button class="add-product-btn barcode-scan-btn" onclick="openBarcodeLookupModal()">📦 Add by
+                            Barcode</button>
                         <button class="add-product-btn" onclick="openAddProductModal()">Add Product</button>
                     </div>
                 </div>
@@ -250,6 +252,36 @@
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="closeModal()">Cancel</button>
                 <button class="btn-save" onclick="saveProduct()">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Barcode Lookup Modal (Quick-scan flow) -->
+    <div class="barcode-modal-overlay" id="barcode-modal-overlay"
+        onclick="if(event.target===this)closeBarcodeLookupModal()">
+        <div class="barcode-modal">
+            <h3>📦 Add Product by Barcode</h3>
+            <p class="modal-subtitle">Enter or scan a barcode to auto-fill product details from barcodelookup.com</p>
+            <div class="scan-input-row">
+                <input type="text" id="scan-barcode-input" placeholder="Enter barcode (UPC/EAN)..." autofocus
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();scanBarcodeLookup();}">
+                <button type="button" class="scan-go-btn" id="scan-go-btn" onclick="scanBarcodeLookup()">Search</button>
+            </div>
+            <div id="scan-status"></div>
+            <div class="scan-result-card" id="scan-result-card">
+                <div class="result-row">
+                    <img class="result-img" id="scan-result-img" src="" alt="Product">
+                    <div class="result-info">
+                        <div class="result-name" id="scan-result-name"></div>
+                        <div class="result-brand" id="scan-result-brand"></div>
+                        <div class="result-barcode" id="scan-result-barcode"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="scan-actions">
+                <button type="button" class="scan-cancel-btn" onclick="closeBarcodeLookupModal()">Cancel</button>
+                <button type="button" class="scan-add-btn" id="scan-add-btn" onclick="useScannedProduct()" disabled>Add
+                    to Products</button>
             </div>
         </div>
     </div>

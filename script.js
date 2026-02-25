@@ -591,6 +591,416 @@ async function removeAllImages() {
 
 window.removeAllImages = removeAllImages;
 
+// =====================
+// Barcode Lookup (barcodelookup.com) Integration
+// =====================
+
+// API key management (same pattern as Pixabay)
+function getBarcodeLookupApiKey() {
+    return window.localStorage.getItem('barcodelookup_api_key') || '';
+}
+
+function setBarcodeLookupApiKey(key) {
+    if (key) window.localStorage.setItem('barcodelookup_api_key', key.trim());
+}
+
+async function ensureBarcodeLookupKeyOrPrompt() {
+    let key = getBarcodeLookupApiKey();
+    if (!key) {
+        key = window.prompt(
+            'Enter your Barcode Lookup API key (from barcodelookup.com/api).\n\n' +
+            'Sign up at barcodelookup.com to get your key:',
+            ''
+        );
+        if (key && key.trim()) {
+            setBarcodeLookupApiKey(key.trim());
+        }
+    }
+    return getBarcodeLookupApiKey();
+}
+
+// Core lookup function — calls our Lambda proxy which fetches from barcodelookup.com server-side
+async function fetchBarcodeLookup(barcode) {
+    const apiKey = await ensureBarcodeLookupKeyOrPrompt();
+    if (!apiKey) throw new Error('API key is required. Please set your Barcode Lookup API key.');
+
+    const cleanBarcode = (barcode || '').trim().replace(/[^0-9]/g, '');
+    if (!cleanBarcode || cleanBarcode.length < 6) {
+        throw new Error('Please enter a valid barcode (at least 6 digits).');
+    }
+
+    // Call our Lambda proxy (bypasses CORS)
+    const proxyUrl = `${API_BASE_URL}/barcode-lookup`;
+    const headers = { 'Content-Type': 'application/json' };
+    const token = getIdToken();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const resp = await fetch(proxyUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ barcode: cleanBarcode, apiKey })
+    });
+
+    if (resp.status === 403) {
+        throw new Error('Invalid API key. Check your Barcode Lookup API key.');
+    }
+    if (resp.status === 404) {
+        throw new Error('Product not found for this barcode.');
+    }
+    if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        throw new Error(`Barcode lookup failed (${resp.status}). ${t}`);
+    }
+
+    const data = await resp.json();
+    const products = data && data.products;
+    if (!products || !products.length) {
+        throw new Error('No product data returned for this barcode.');
+    }
+    return products[0]; // return first match
+}
+
+// Parse API response into a clean product object
+function parseBarcodeLookupResult(apiProduct) {
+    const result = {
+        name: apiProduct.title || apiProduct.product_name || '',
+        description: apiProduct.description || '',
+        brand: apiProduct.brand || '',
+        category: apiProduct.category || '',
+        barcode: apiProduct.barcode_number || '',
+        imageUrl: '',
+        allImages: []
+    };
+
+    // Get images (API returns an images array of URLs)
+    if (Array.isArray(apiProduct.images) && apiProduct.images.length > 0) {
+        result.imageUrl = apiProduct.images[0];
+        result.allImages = apiProduct.images.slice(0, 2); // max 2 images
+    }
+
+    return result;
+}
+
+// Download an image URL as a File object for the image picker
+// Uses multiple fallback strategies to handle CORS restrictions
+async function downloadImageAsFile(imageUrl, fileName) {
+    const safeName = (fileName || 'barcode-image').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) + '.jpg';
+
+    // Strategy 1: Direct fetch with CORS
+    try {
+        const resp = await fetch(imageUrl, { mode: 'cors' });
+        if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
+        const blob = await resp.blob();
+        const processed = await renderToFixedCanvasJpeg(blob, 760, 600, 0.9);
+        if (!processed) throw new Error('Image processing failed');
+        return new File([processed], safeName, { type: 'image/jpeg' });
+    } catch (e) {
+        console.warn('downloadImageAsFile: direct fetch failed, trying img+canvas fallback:', e.message);
+    }
+
+    // Strategy 2: Load via <img crossOrigin="anonymous"> + draw to canvas
+    try {
+        const blob = await new Promise((resolve, reject) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 760;
+                    canvas.height = 600;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, 760, 600);
+                    const iw = img.naturalWidth || img.width;
+                    const ih = img.naturalHeight || img.height;
+                    const scale = Math.min(760 / iw, 600 / ih);
+                    const dw = Math.floor(iw * scale);
+                    const dh = Math.floor(ih * scale);
+                    const dx = Math.floor((760 - dw) / 2);
+                    const dy = Math.floor((600 - dh) / 2);
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(img, dx, dy, dw, dh);
+                    canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/jpeg', 0.9);
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            img.onerror = () => reject(new Error('img load failed'));
+            img.src = imageUrl;
+        });
+        if (blob) return new File([blob], safeName, { type: 'image/jpeg' });
+    } catch (e2) {
+        console.warn('downloadImageAsFile: img+canvas crossOrigin failed, trying without crossOrigin:', e2.message);
+    }
+
+    // Strategy 3: Load via <img> without crossOrigin (some servers reject anonymous)
+    // Then draw on canvas — may hit tainted canvas, but worth trying
+    try {
+        const blob = await new Promise((resolve, reject) => {
+            const img = new Image();
+            // No crossOrigin attribute
+            img.onload = () => {
+                try {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = 760;
+                    canvas.height = 600;
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#ffffff';
+                    ctx.fillRect(0, 0, 760, 600);
+                    const iw = img.naturalWidth || img.width;
+                    const ih = img.naturalHeight || img.height;
+                    const scale = Math.min(760 / iw, 600 / ih);
+                    const dw = Math.floor(iw * scale);
+                    const dh = Math.floor(ih * scale);
+                    const dx = Math.floor((760 - dw) / 2);
+                    const dy = Math.floor((600 - dh) / 2);
+                    ctx.imageSmoothingQuality = 'high';
+                    ctx.drawImage(img, dx, dy, dw, dh);
+                    canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/jpeg', 0.9);
+                } catch (err) {
+                    reject(err);
+                }
+            };
+            img.onerror = () => reject(new Error('img load failed'));
+            img.src = imageUrl;
+        });
+        if (blob) return new File([blob], safeName, { type: 'image/jpeg' });
+    } catch (e3) {
+        console.warn('downloadImageAsFile: all strategies failed:', e3.message);
+    }
+
+    return null;
+}
+
+// Set a downloaded image file into the product modal's image slot
+function setImageInSlot(file, slotIdx) {
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+        selectedImages[slotIdx] = { file, url, width: img.naturalWidth, height: img.naturalHeight };
+        carouselIndex = slotIdx;
+        updateCarouselUI();
+    };
+    img.onerror = () => {
+        URL.revokeObjectURL(url);
+        console.warn('Failed to load downloaded image into slot', slotIdx);
+    };
+    img.src = url;
+}
+
+// =====================
+// In-modal "Lookup" button (inside Add/Edit Product modal)
+// =====================
+async function lookupBarcode() {
+    const barcodeInput = document.getElementById('product-barcode');
+    const statusEl = document.getElementById('barcode-lookup-status');
+    const lookupBtn = document.getElementById('barcode-lookup-btn');
+    const barcode = (barcodeInput && barcodeInput.value || '').trim();
+
+    if (!barcode) {
+        if (statusEl) statusEl.innerHTML = '<span class="lookup-error">Please enter a barcode first.</span>';
+        return;
+    }
+
+    // Show loading
+    if (statusEl) statusEl.innerHTML = '<span class="lookup-loading"><span class="spinner"></span> Looking up barcode...</span>';
+    if (lookupBtn) lookupBtn.disabled = true;
+
+    try {
+        const apiProduct = await fetchBarcodeLookup(barcode);
+        const result = parseBarcodeLookupResult(apiProduct);
+
+        // Auto-fill name
+        const nameInput = document.getElementById('product-name');
+        if (nameInput && result.name) {
+            nameInput.value = result.name;
+        }
+
+        // Auto-fill description if empty
+        const descInput = document.getElementById('product-description');
+        if (descInput && !descInput.value.trim() && result.description) {
+            // Truncate long descriptions
+            descInput.value = result.description.length > 300
+                ? result.description.slice(0, 297) + '...'
+                : result.description;
+        }
+
+        // Download and attach images
+        let imageCount = 0;
+        if (result.allImages.length > 0) {
+            for (let i = 0; i < Math.min(result.allImages.length, 2); i++) {
+                if (selectedImages[i]) continue; // don't overwrite existing images
+                const file = await downloadImageAsFile(result.allImages[i], result.name || 'product');
+                if (file) {
+                    setImageInSlot(file, i);
+                    imageCount++;
+                }
+            }
+        }
+
+        // Success message
+        const parts = [];
+        if (result.name) parts.push(`Name: "${result.name}"`);
+        if (imageCount > 0) parts.push(`${imageCount} image${imageCount > 1 ? 's' : ''} loaded`);
+        if (result.brand) parts.push(`Brand: ${result.brand}`);
+
+        if (statusEl) {
+            statusEl.innerHTML = `<span class="lookup-success">✓ Found! ${parts.join(' · ')}</span>`;
+            setTimeout(() => { if (statusEl) statusEl.innerHTML = ''; }, 6000);
+        }
+
+        // Trigger image suggestions refresh
+        if (typeof suggestImagesForCurrentProduct === 'function') {
+            setTimeout(() => suggestImagesForCurrentProduct(), 100);
+        }
+    } catch (err) {
+        if (statusEl) statusEl.innerHTML = `<span class="lookup-error">✗ ${err.message}</span>`;
+    } finally {
+        if (lookupBtn) lookupBtn.disabled = false;
+    }
+}
+
+// =====================
+// "Add by Barcode" Quick-Scan Modal
+// =====================
+let scannedProductData = null; // stores the parsed result for the "Add" action
+
+function openBarcodeLookupModal() {
+    const overlay = document.getElementById('barcode-modal-overlay');
+    if (!overlay) return;
+    overlay.classList.add('open');
+    scannedProductData = null;
+    // Reset UI
+    const input = document.getElementById('scan-barcode-input');
+    if (input) { input.value = ''; input.focus(); }
+    const status = document.getElementById('scan-status');
+    if (status) status.innerHTML = '';
+    const card = document.getElementById('scan-result-card');
+    if (card) card.classList.remove('show');
+    const addBtn = document.getElementById('scan-add-btn');
+    if (addBtn) addBtn.disabled = true;
+}
+
+function closeBarcodeLookupModal() {
+    const overlay = document.getElementById('barcode-modal-overlay');
+    if (overlay) overlay.classList.remove('open');
+    scannedProductData = null;
+}
+
+async function scanBarcodeLookup() {
+    const input = document.getElementById('scan-barcode-input');
+    const statusEl = document.getElementById('scan-status');
+    const card = document.getElementById('scan-result-card');
+    const goBtn = document.getElementById('scan-go-btn');
+    const addBtn = document.getElementById('scan-add-btn');
+    const barcode = (input && input.value || '').trim();
+
+    if (!barcode) {
+        if (statusEl) statusEl.innerHTML = '<span class="lookup-error">Please enter a barcode.</span>';
+        return;
+    }
+
+    // Loading
+    if (statusEl) statusEl.innerHTML = '<span class="lookup-loading"><span class="spinner"></span> Searching barcodelookup.com...</span>';
+    if (goBtn) goBtn.disabled = true;
+    if (addBtn) addBtn.disabled = true;
+    if (card) card.classList.remove('show');
+
+    try {
+        const apiProduct = await fetchBarcodeLookup(barcode);
+        const result = parseBarcodeLookupResult(apiProduct);
+        scannedProductData = result;
+
+        // Populate result card
+        const nameEl = document.getElementById('scan-result-name');
+        const brandEl = document.getElementById('scan-result-brand');
+        const barcodeEl = document.getElementById('scan-result-barcode');
+        const imgEl = document.getElementById('scan-result-img');
+
+        if (nameEl) nameEl.textContent = result.name || 'Unknown Product';
+        if (brandEl) brandEl.textContent = result.brand ? `Brand: ${result.brand}` : '';
+        if (barcodeEl) barcodeEl.textContent = `Barcode: ${result.barcode}`;
+        if (imgEl) {
+            if (result.imageUrl) {
+                imgEl.src = result.imageUrl;
+                imgEl.style.display = 'block';
+            } else {
+                imgEl.style.display = 'none';
+            }
+        }
+
+        // Show card
+        if (card) card.classList.add('show');
+        if (addBtn) addBtn.disabled = false;
+        if (statusEl) statusEl.innerHTML = '<span class="lookup-success">✓ Product found! Review below and click "Add to Products".</span>';
+    } catch (err) {
+        scannedProductData = null;
+        if (statusEl) statusEl.innerHTML = `<span class="lookup-error">✗ ${err.message}</span>`;
+        if (card) card.classList.remove('show');
+        if (addBtn) addBtn.disabled = true;
+    } finally {
+        if (goBtn) goBtn.disabled = false;
+    }
+}
+
+// Use the scanned result — opens the standard Add Product modal pre-filled
+async function useScannedProduct() {
+    if (!scannedProductData) return;
+    const data = scannedProductData;
+
+    // Close the barcode modal
+    closeBarcodeLookupModal();
+
+    // Open the standard Add Product modal
+    openAddProductModal();
+
+    // Fill in fields
+    const nameInput = document.getElementById('product-name');
+    if (nameInput && data.name) nameInput.value = data.name;
+
+    const descInput = document.getElementById('product-description');
+    if (descInput && data.description) {
+        descInput.value = data.description.length > 300
+            ? data.description.slice(0, 297) + '...'
+            : data.description;
+    }
+
+    const barcodeInput = document.getElementById('product-barcode');
+    if (barcodeInput && data.barcode) barcodeInput.value = data.barcode;
+
+    // Download and attach images to the carousel
+    if (data.allImages && data.allImages.length > 0) {
+        const modalError = document.getElementById('modal-error');
+        if (modalError) modalError.innerHTML = '<div style="color:#2563eb;padding:8px 12px;background:#eff6ff;border-radius:8px;margin-bottom:8px;font-size:13px;">📦 Downloading product images from barcode lookup...</div>';
+
+        let attachedCount = 0;
+        for (let i = 0; i < Math.min(data.allImages.length, 2); i++) {
+            const file = await downloadImageAsFile(data.allImages[i], data.name || 'product');
+            if (file) {
+                setImageInSlot(file, i);
+                attachedCount++;
+            }
+        }
+
+        if (modalError) {
+            if (attachedCount > 0) {
+                modalError.innerHTML = `<div style="color:#16a34a;padding:8px 12px;background:#f0fdf4;border-radius:8px;margin-bottom:8px;font-size:13px;">✓ ${attachedCount} image${attachedCount > 1 ? 's' : ''} attached from barcode lookup. Fill in remaining fields and save.</div>`;
+            } else {
+                modalError.innerHTML = '<div style="color:#d97706;padding:8px 12px;background:#fffbeb;border-radius:8px;margin-bottom:8px;font-size:13px;">⚠ Could not download product images. You can add images manually.</div>';
+            }
+            setTimeout(() => { if (modalError) modalError.innerHTML = ''; }, 6000);
+        }
+    }
+}
+
+// Expose to window for HTML onclick handlers
+window.lookupBarcode = lookupBarcode;
+window.openBarcodeLookupModal = openBarcodeLookupModal;
+window.closeBarcodeLookupModal = closeBarcodeLookupModal;
+window.scanBarcodeLookup = scanBarcodeLookup;
+window.useScannedProduct = useScannedProduct;
+
 function setIdToken(token) {
     if (token) window.localStorage.setItem('id_token', token);
 }

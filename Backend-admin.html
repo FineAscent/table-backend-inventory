@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AliBaba Admin Dashboard</title>
     <link rel="stylesheet" href="styles.css?v=20250831">
 </head>
+
 <body>
     <!-- Header -->
     <div class="header">
@@ -14,7 +16,8 @@
             <button class="publish-btn" onclick="publishChanges()">Publish</button>
             <span id="signed-in-msg" class="signed-in-msg"></span>
             <button id="login-btn" class="auth-btn" type="button" onclick="login()">Login</button>
-            <button id="logout-btn" class="auth-btn" type="button" onclick="logout()" style="display:none">Logout</button>
+            <button id="logout-btn" class="auth-btn" type="button" onclick="logout()"
+                style="display:none">Logout</button>
             <div class="user-avatar"></div>
         </div>
     </div>
@@ -41,22 +44,26 @@
                     <div class="header-actions">
                         <input type="file" id="csv-input" accept=".csv" hidden onchange="onCsvSelected(event)">
                         <button class="add-product-btn import-csv-btn" onclick="triggerCsvPick()">Import CSV</button>
+                        <button class="add-product-btn barcode-scan-btn" onclick="openBarcodeLookupModal()">📦 Add by
+                            Barcode</button>
                         <button class="add-product-btn" onclick="openAddProductModal()">Add Product</button>
                     </div>
                 </div>
-                
+
                 <!-- Search Bar -->
                 <div class="search-bar">
                     <div class="search-input-wrap">
                         <span class="search-icon">🔎</span>
-                        <input id="product-search" type="text" class="search-input" placeholder="Search by name or barcode..." oninput="onSearchInput(event)">
-                        <button type="button" class="search-clear" onclick="clearSearch()" aria-label="Clear search">✕</button>
+                        <input id="product-search" type="text" class="search-input"
+                            placeholder="Search by name or barcode..." oninput="onSearchInput(event)">
+                        <button type="button" class="search-clear" onclick="clearSearch()"
+                            aria-label="Clear search">✕</button>
                     </div>
                 </div>
-                
+
                 <div id="loading" class="loading" style="display: none;">Loading products...</div>
                 <div id="error-message"></div>
-                
+
                 <table id="products-table">
                     <thead>
                         <tr>
@@ -86,20 +93,20 @@
                 <h3 class="modal-title" id="modal-title">Add Product</h3>
                 <button class="close-btn" onclick="closeModal()">&times;</button>
             </div>
-            
+
             <div id="modal-error"></div>
-            
+
             <form id="product-form">
                 <div class="form-group">
                     <label class="form-label">Name</label>
                     <input type="text" class="form-input" id="product-name" required>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label">Description</label>
                     <input type="text" class="form-input" id="product-description" required>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label">Category</label>
                     <select class="form-select" id="product-category" required>
@@ -115,7 +122,7 @@
                         <option value="Meat &amp; Poultry">Meat &amp; Poultry</option>
                     </select>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label">Price ($)</label>
                     <div class="price-wrap">
@@ -129,12 +136,21 @@
                         </select>
                     </div>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label">Barcode</label>
-                    <input type="text" class="form-input" id="product-barcode" required>
+                    <div class="barcode-input-wrap">
+                        <input type="text" class="form-input" id="product-barcode" required
+                            placeholder="Enter barcode number...">
+                        <button type="button" class="barcode-lookup-btn" id="barcode-lookup-btn"
+                            onclick="lookupBarcode()" title="Lookup product info from barcode">
+                            <span class="lookup-icon">🔍</span>
+                            <span class="lookup-text">Lookup</span>
+                        </button>
+                    </div>
+                    <div id="barcode-lookup-status" class="barcode-lookup-status"></div>
                 </div>
-                
+
                 <div class="form-group">
                     <label class="form-label">Availability</label>
                     <select class="form-select" id="product-availability" required>
@@ -172,32 +188,37 @@
                     <label class="form-label">Images (up to 2)</label>
                     <div class="image-picker">
                         <div class="image-carousel">
-                            <button type="button" class="carousel-nav prev" onclick="carouselPrev()" aria-label="Previous image">◀</button>
+                            <button type="button" class="carousel-nav prev" onclick="carouselPrev()"
+                                aria-label="Previous image">◀</button>
                             <div class="carousel-viewport">
                                 <img id="carousel-image" alt="Preview" />
                                 <div id="carousel-empty" class="carousel-empty">No image selected</div>
                             </div>
-                            <button type="button" class="carousel-nav next" onclick="carouselNext()" aria-label="Next image">▶</button>
+                            <button type="button" class="carousel-nav next" onclick="carouselNext()"
+                                aria-label="Next image">▶</button>
                         </div>
                         <div class="image-dots" id="image-dots"></div>
 
                         <div class="image-slots">
                             <div class="image-slot" id="slot-0">
-                                <input type="file" id="file-0" accept="image/*" hidden onchange="onSelectImage(event, 0)">
+                                <input type="file" id="file-0" accept="image/*" hidden
+                                    onchange="onSelectImage(event, 0)">
                                 <label for="file-0" class="slot-drop">Add/Replace Image 1</label>
                                 <button type="button" class="slot-remove" onclick="removeImage(0)">Remove</button>
                             </div>
                             <div class="image-slot" id="slot-1">
-                                <input type="file" id="file-1" accept="image/*" hidden onchange="onSelectImage(event, 1)">
+                                <input type="file" id="file-1" accept="image/*" hidden
+                                    onchange="onSelectImage(event, 1)">
                                 <label for="file-1" class="slot-drop">Add/Replace Image 2</label>
                                 <button type="button" class="slot-remove" onclick="removeImage(1)">Remove</button>
                             </div>
                         </div>
-                        <div class="image-hint">Recommended minimum: 760 × 600 px. Smaller images will be rejected. Any image format is allowed.</div>
+                        <div class="image-hint">Recommended minimum: 760 × 600 px. Smaller images will be rejected. Any
+                            image format is allowed.</div>
                     </div>
                 </div>
             </form>
-            
+
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="closeModal()">Cancel</button>
                 <button class="btn-save" onclick="saveProduct()">Save</button>
@@ -205,6 +226,37 @@
         </div>
     </div>
 
+    <!-- Barcode Lookup Modal (Quick-scan flow) -->
+    <div class="barcode-modal-overlay" id="barcode-modal-overlay"
+        onclick="if(event.target===this)closeBarcodeLookupModal()">
+        <div class="barcode-modal">
+            <h3>📦 Add Product by Barcode</h3>
+            <p class="modal-subtitle">Enter or scan a barcode to auto-fill product details from barcodelookup.com</p>
+            <div class="scan-input-row">
+                <input type="text" id="scan-barcode-input" placeholder="Enter barcode (UPC/EAN)..." autofocus
+                    onkeydown="if(event.key==='Enter'){event.preventDefault();scanBarcodeLookup();}">
+                <button type="button" class="scan-go-btn" id="scan-go-btn" onclick="scanBarcodeLookup()">Search</button>
+            </div>
+            <div id="scan-status"></div>
+            <div class="scan-result-card" id="scan-result-card">
+                <div class="result-row">
+                    <img class="result-img" id="scan-result-img" src="" alt="Product">
+                    <div class="result-info">
+                        <div class="result-name" id="scan-result-name"></div>
+                        <div class="result-brand" id="scan-result-brand"></div>
+                        <div class="result-barcode" id="scan-result-barcode"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="scan-actions">
+                <button type="button" class="scan-cancel-btn" onclick="closeBarcodeLookupModal()">Cancel</button>
+                <button type="button" class="scan-add-btn" id="scan-add-btn" onclick="useScannedProduct()" disabled>Add
+                    to Products</button>
+            </div>
+        </div>
+    </div>
+
     <script src="script.js?v=20250831-2"></script>
 </body>
+
 </html>

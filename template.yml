@@ -169,6 +169,19 @@ Resources:
             Path: /image-url
             Method: post
 
+  BarcodeLookupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: backend/src/
+      Handler: barcode_lookup.handler
+      Timeout: 15
+      Events:
+        BarcodeLookup:
+          Type: Api
+          Properties:
+            Path: /barcode-lookup
+            Method: post
+
   # Explicit OPTIONS handlers if needed by API Gateway to pass checks,
   # though usually the 'Cors' property on API or Function can handle it.
   # The lambda code itself handles OPTIONS so we just need the traffic to reach it.
