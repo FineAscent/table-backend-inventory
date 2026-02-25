@@ -1,134 +1,197 @@
-AliBaba Inventory: How This Works
-Project structure
-Frontend (static)
-Backend-admin.html
-: Admin UI layout and elements.
-styles.css
-: All UI styling. Includes table, modal, carousel, and image-box styles.
-script.js
-: Frontend logic: loads products, add/edit modal, image upload, thumbnails, and API calls.
-Backend (SAM)
-backend/template.yaml
-: AWS SAM template for API Gateway, Lambda, DynamoDB, and S3.
-backend/src/
-list.js
-: GET /products list API.
-create.js
-: POST /products create API.
-update.js
-: PUT /products/{id} update API, supports image deletions via deleteKeys.
-delete.js
-: DELETE /products/{id} deletes product and its images from S3.
-upload_url.js
-: POST /upload-url returns a presigned S3 PUT URL for uploading an image.
-get_image_url.js
-: POST /image-url returns a presigned S3 GET URL for displaying an image.
-Data model (DynamoDB)
-Table name: ${ProjectName}-${StageName}, e.g. aliabab-inventory-dev
-Item shape (fields used by frontend):
-id (string, UUID)
-name (string)
-description (string)
-category (string)
-price (number)
-barcode (string, unique)
-availability (string: "In Stock" | "Out of Stock")
-imageKeys (array of up to 2 strings) – S3 object keys for product images
-Timestamps and GSIs for filtering/searching
-Images: where and how they are saved
-S3 bucket: ${ProjectName}-${StageName}-images (e.g., aliabab-inventory-dev-images), private.
-Images are uploaded directly from the browser to S3 via a presigned PUT URL from POST /upload-url.
-The S3 object key is saved into the product’s imageKeys array.
-When rendering, the UI calls POST /image-url with a key to get a temporary signed GET URL, then uses that URL in <img src="...">.
-Frontend flows
-Load products
-script.js
- calls GET /products.
-Populates the table. If imageKeys exists, it requests a signed image URL for the first image to show a thumbnail.
-Add product
-Open modal, fill fields.
-Optional: select up to 2 images.
-For each selected image:
-Call POST /upload-url ⇒ returns { uploadUrl, key }.
-PUT the file to uploadUrl.
-Collect keys into imageKeys.
-Submit product via POST /products with body including imageKeys.
-Edit product
-Modal pre-fills fields and shows existing images (fetched via POST /image-url).
-If an existing image is removed in the modal, its key is pushed to deleteKeys.
-Any newly selected images are uploaded via upload-url.
-Submit via PUT /products/{id} with optional imageKeys (new ones) and deleteKeys (to remove old ones).
-Backend:
-Deletes deleteKeys from S3.
-Saves the final imageKeys = (existing − deleteKeys) + newUploads, capped at 2.
-Delete product
-DELETE /products/{id} deletes both the product item in DynamoDB and any imageKeys in S3.
-Backend endpoints
-Base URL: https://fqnz42nyi8.execute-api.us-east-1.amazonaws.com/dev
+# AliBaba Inventory — How This Works
 
-GET /products
-Returns list of product items.
-POST /products
-Body: { name, description, category, price, barcode, availability, imageKeys? }
-PUT /products/{id}
-Body: { name, description, category, price, barcode, availability, imageKeys?, deleteKeys? }
-DELETE /products/{id}
-POST /upload-url
-Body: { fileName, contentType, productId? }
-Returns { uploadUrl, key }
-POST /image-url
-Body: { key }
-Returns { url } (temporary signed GET URL)
-CORS is enabled at API Gateway and on lambdas. S3 bucket has permissive CORS for PUT/GET/HEAD.
+## Project Structure
 
-Styling notes (thumbnails)
-Table thumbnail container: .product-image fixed at 168x133.
-CSS forces child <img> to fully fill the box:
-.product-image img { width: 100% !important; height: 100% !important; object-fit: cover; }
-How to display items in another HTML page
-If you want a separate site/page to list products with name, description, price, and first image, do this:
+### Frontend (Static — hosted on GitHub Pages)
 
-Include a script that fetches products
-Use the same API base URL.
-For each product, if it has imageKeys[0], call POST /image-url to get a signed URL for display.
-Render the HTML
-For each item, render an image, name, description, and price.
-Example minimal HTML+JS:
+| File | Purpose |
+|------|---------|
+| `index.html` | Main admin dashboard — product table, add/edit/delete, barcode scan, CSV import |
+| `Backend-admin.html` | Simplified admin view (legacy) |
+| `styles.css` | All UI styling: table, modals, carousel, barcode modal, search bar |
+| `script.js` | Frontend logic: API calls, product CRUD, image upload, barcode lookup, auth |
 
-html
+### Backend (AWS SAM — `template.yml`)
+
+| File | Lambda Handler | Endpoint | Purpose |
+|------|---------------|----------|---------|
+| `backend/src/list.js` | `list.handler` | `GET /products` | List all products |
+| `backend/src/create.js` | `create.handler` | `POST /products` | Create a new product |
+| `backend/src/get.js` | `get.handler` | `GET /products/{id}` | Get a single product |
+| `backend/src/update.js` | `update.handler` | `PUT /products/{id}` | Update product, handles image deletions via `deleteKeys` |
+| `backend/src/delete.js` | `delete.handler` | `DELETE /products/{id}` | Delete product + its images from S3 |
+| `backend/src/upload_url.js` | `upload_url.handler` | `POST /upload-url` | Returns a presigned S3 PUT URL for image upload |
+| `backend/src/get_image_url.js` | `get_image_url.handler` | `POST /image-url` | Returns a presigned S3 GET URL for image display |
+| `backend/src/barcode_lookup.js` | `barcode_lookup.handler` | `POST /barcode-lookup` | Proxies barcodelookup.com API (bypasses CORS) |
+| `backend/src/image_proxy.js` | `image_proxy.handler` | `POST /image-proxy` | Proxies external image downloads (bypasses CORS), returns base64 |
+
+---
+
+## AWS Resources
+
+### Current Configuration
+
+| Resource | Value |
+|----------|-------|
+| **Stack Name** | `aliabab-inventory-dev-v2` |
+| **Region** | `us-east-1` |
+| **API Base URL** | `https://q5mv3u14v5.execute-api.us-east-1.amazonaws.com/Prod` |
+| **DynamoDB Table** | `aliabab-inventory-dev-v2-InventoryTable-14VA3OM41Q0RR` |
+| **S3 Image Bucket** | `aliabab-inventory-dev-v2-imagebucket-rptc67hjm0qt` |
+| **Auth** | AWS Cognito (domain: `aliabab-inventory-v2-dev-admin.auth.us-east-1.amazoncognito.com`) |
+| **Frontend URL** | `https://fineascent.github.io/table-backend-inventory/` |
+
+### API Endpoints
+
+All endpoints are relative to:
+```
+https://q5mv3u14v5.execute-api.us-east-1.amazonaws.com/Prod
+```
+
+| Method | Path | Body | Description |
+|--------|------|------|-------------|
+| `GET` | `/products` | — | List all products |
+| `POST` | `/products` | `{ name, description, category, price, priceUnit, barcode, availability, areaLocation, scaleNeed, imageKeys?, allergySummary? }` | Create product |
+| `GET` | `/products/{id}` | — | Get single product |
+| `PUT` | `/products/{id}` | Same as POST + `deleteKeys?` | Update product |
+| `DELETE` | `/products/{id}` | — | Delete product + S3 images |
+| `POST` | `/upload-url` | `{ fileName, contentType, productId? }` | Get presigned S3 upload URL → `{ uploadUrl, key }` |
+| `POST` | `/image-url` | `{ key }` | Get presigned S3 display URL → `{ url }` |
+| `POST` | `/barcode-lookup` | `{ barcode, apiKey }` | Proxy barcodelookup.com API → product data |
+| `POST` | `/image-proxy` | `{ url }` | Proxy external image download → `{ dataUrl, contentType, size }` |
+
+**Auth:** Include `Authorization: Bearer <id_token>` header (from Cognito login).
+
+**CORS:** Configured at API Gateway level. All endpoints support `OPTIONS` preflight with `Access-Control-Allow-Origin: *`.
+
+---
+
+## Data Model (DynamoDB)
+
+**Item fields:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `id` | String (UUID) | Auto | Primary key |
+| `name` | String | ✓ | Product name |
+| `description` | String | ✓ | Product description |
+| `category` | String | ✓ | One of: Fruits & Veggies, Seafood, Bakery, Frozen Foods, Beverages, Snacks, Infant Care, Cereals & Breakfast, Meat & Poultry |
+| `price` | Number | ✓ | Price value |
+| `priceUnit` | String | — | per piece, lb, oz, g, kg, gallon, dozen, loaf, bag, bags, carton, block, jar, cup, box, pack, can, bottle |
+| `barcode` | String | ✓ | Unique barcode (enforced via GSI2) |
+| `availability` | String | ✓ | "In Stock" or "Out of Stock" |
+| `areaLocation` | String | — | A1–A10 |
+| `scaleNeed` | Boolean | — | Whether product requires scale |
+| `imageKeys` | Array[String] | — | Up to 2 S3 object keys |
+| `allergySummary` | String | — | AI-generated allergy info or "none" |
+| `createdAt` | String (ISO) | Auto | Creation timestamp |
+| `updatedAt` | String (ISO) | Auto | Last update timestamp |
+
+**GSIs:**
+- **GSI1:** `gsi1_pk` (availability) + `gsi1_sk` (createdAt) — filter by stock status
+- **GSI2:** `gsi2_pk` (barcode) — enforce barcode uniqueness
+
+---
+
+## Images — How They Work
+
+1. **Upload flow:**
+   - Frontend calls `POST /upload-url` → gets `{ uploadUrl, key }`
+   - Frontend PUTs image file directly to S3 via presigned URL
+   - The S3 key is saved in the product's `imageKeys` array
+
+2. **Display flow:**
+   - Frontend calls `POST /image-url` with key → gets `{ url }` (temporary signed GET URL)
+   - Uses URL in `<img src="...">`
+
+3. **Deletion flow:**
+   - When editing: removed images' keys go into `deleteKeys`
+   - `PUT /products/{id}` with `deleteKeys` → backend calls `s3.deleteObjects()` to remove from S3
+   - When deleting product: `DELETE /products/{id}` auto-deletes all associated images
+
+4. **Barcode images:**
+   - When adding by barcode, images are downloaded via the `/image-proxy` Lambda (server-side, bypasses CORS)
+   - Images are processed to 760×600 JPEG on white background
+   - Attached to carousel slots in the Add Product modal
+   - Uploaded to S3 on save
+
+---
+
+## Key Frontend Flows
+
+### Add Product by Barcode
+1. Click **📦 Add by Barcode** → barcode modal opens
+2. Enter/scan barcode → click **Search**
+3. Product info fetched via `POST /barcode-lookup` (server-side proxy)
+4. Click **Add to Products** → Add Product modal opens pre-filled with name, description, barcode
+5. Images auto-downloaded via `POST /image-proxy` → attached to carousel
+6. Fill remaining fields (category, price, area) → click **Save**
+7. Images uploaded to S3, product saved to DynamoDB
+
+### Import CSV
+1. Click **Import CSV** → select `.csv` file
+2. Expected columns: `ItemId, ItemName, ItemPrice, Availability, Description, Category, Barcode, PriceUnit, AreaLocation, ScaleNeed, ImageKeys, AllergySummary`
+3. Products created via `POST /products` for each row
+
+### Edit Product
+1. Click edit icon on product row → modal opens with current data + images
+2. Modify fields, add/remove images
+3. Save → new images uploaded to S3, old removed images deleted from S3
+
+---
+
+## Deploy
+
+### Build & Deploy
+
+From `inventory-stack/` directory:
+
+```bash
+sam build
+sam deploy --stack-name aliabab-inventory-dev-v2 --capabilities CAPABILITY_IAM --resolve-s3 --no-confirm-changeset
+```
+
+### After Deploy
+
+Check the outputs for the new API URL:
+
+```bash
+aws cloudformation describe-stacks --stack-name aliabab-inventory-dev-v2 --query 'Stacks[0].Outputs' --output table
+```
+
+If the API URL changes, update `API_BASE_URL` in `script.js` line 2.
+
+### Common Issues
+
+- **CORS 403 on preflight:** Force a redeployment of the API stage:
+  ```bash
+  aws apigateway create-deployment --rest-api-id <api-id> --stage-name Prod
+  ```
+- **Empty table after deploy:** If DynamoDB table was recreated, re-import via CSV (`main-data.csv` in project root)
+
+---
+
+## Displaying Products on Another Page
+
+Use the same API to build a customer-facing page:
+
+```html
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
   <title>Menu</title>
-  <style>
-    .card { width: 240px; border: 1px solid #eee; border-radius: 8px; padding: 12px; }
-    .thumb { width: 100%; height: 160px; border-radius: 6px; overflow: hidden; background: #f0f0f0; }
-    .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .name { font-weight: 600; margin-top: 8px; }
-    .desc { color: #666; font-size: 14px; margin-top: 4px; }
-    .price { font-weight: 700; margin-top: 6px; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(240px,1fr)); gap: 16px; }
-  </style>
 </head>
 <body>
-  <div id="menu" class="grid"></div>
-
+  <div id="menu"></div>
   <script>
-    const API_BASE_URL = 'https://fqnz42nyi8.execute-api.us-east-1.amazonaws.com/dev';
-
-    async function fetchJSON(url, opts) {
-      const r = await fetch(url, opts);
-      if (!r.ok) throw new Error(await r.text());
-      return r.json();
-    }
+    const API_BASE_URL = 'https://q5mv3u14v5.execute-api.us-east-1.amazonaws.com/Prod';
 
     async function getImageUrl(key) {
-      const body = JSON.stringify({ key });
       const r = await fetch(API_BASE_URL + '/image-url', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body
+        body: JSON.stringify({ key })
       });
       if (!r.ok) return { url: '' };
       return r.json();
@@ -136,47 +199,30 @@ html
 
     async function loadMenu() {
       const container = document.getElementById('menu');
-      container.innerHTML = 'Loading...';
-      try {
-        const list = await fetchJSON(API_BASE_URL + '/products');
-        const items = list.items || list.Items || [];
-        const rows = [];
-        for (const p of items) {
-          let imgUrl = '';
-          const keys = p.imageKeys || p.image_keys || [];
-          if (Array.isArray(keys) && keys[0]) {
-            try {
-              const { url } = await getImageUrl(keys[0]);
-              imgUrl = url || '';
-            } catch (_) {}
-          }
-          rows.push(`
-            <div class="card">
-              <div class="thumb">${imgUrl ? `<img src="${imgUrl}" alt="">` : ''}</div>
-              <div class="name">${p.name || ''}</div>
-              <div class="desc">${p.description || ''}</div>
-              <div class="price">$${Number(p.price || 0).toFixed(2)}</div>
-            </div>
-          `);
+      const res = await fetch(API_BASE_URL + '/products');
+      const data = await res.json();
+      const items = data.items || [];
+
+      for (const p of items) {
+        let imgUrl = '';
+        const keys = p.imageKeys || [];
+        if (keys[0]) {
+          try { imgUrl = (await getImageUrl(keys[0])).url || ''; } catch(_) {}
         }
-        container.innerHTML = rows.join('');
-      } catch (e) {
-        container.innerHTML = 'Failed to load menu';
+        container.innerHTML += `
+          <div>
+            ${imgUrl ? `<img src="${imgUrl}" width="200">` : ''}
+            <h3>${p.name}</h3>
+            <p>${p.description}</p>
+            <p><strong>$${Number(p.price).toFixed(2)}</strong></p>
+          </div>
+        `;
       }
     }
-
     loadMenu();
   </script>
 </body>
 </html>
+```
 
-Notes:
-
-This page can be hosted anywhere; it calls the same backend.
-Images are private in S3; the page relies on the POST /image-url endpoint for a short-lived link.
-If you need public CDN access, add CloudFront with OAC and expose images securely without presigned URLs.
-Operational notes
-Deploy backend:
-From inventory-stack/backend/: sam build && sam deploy --guided (first time), then sam deploy.
-Common issues:
-If you hit CORS preflight 403, wait a minute after deploy and refresh. CORS is configured on API + functions; OPTIONS methods exist for /upload-url and /image-url.
+> **Note:** Images are private in S3. The page must call `POST /image-url` to get short-lived signed URLs.

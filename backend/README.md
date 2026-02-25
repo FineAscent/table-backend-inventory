@@ -1,114 +1,57 @@
-# aliabab-inventory backend (SAM)
+# AliBaba Inventory Backend (SAM)
+
+> **Note:** The active SAM template is `inventory-stack/template.yml` (not this directory's `template.yaml`).
 
 This folder contains an AWS SAM application that deploys:
-- DynamoDB table with GSIs (barcode uniqueness, availability filter)
-- API Gateway (REGIONAL) with API Key auth
-- 4 Lambda functions (Node.js 20): list, create, update, delete
+- **DynamoDB** table with GSIs (barcode uniqueness, availability filter)
+- **API Gateway** with Cognito auth and CORS
+- **9 Lambda functions** (Node.js 18): list, create, get, update, delete, upload-url, image-url, barcode-lookup, image-proxy
+- **S3 bucket** for product images
 
-Resources are parameterized for environments: dev and prod.
+## Current Deployment
 
-## Prerequisites
-- AWS account with credentials configured (us-east-1)
-- AWS SAM CLI installed
-- Node.js 20+ (for local packaging)
+| Resource | Value |
+|----------|-------|
+| **Stack** | `aliabab-inventory-dev-v2` |
+| **Region** | `us-east-1` |
+| **API URL** | `https://q5mv3u14v5.execute-api.us-east-1.amazonaws.com/Prod` |
 
-## Deploy (dev)
+## Deploy
 
-From the `backend/` directory:
-
-```bash
-sam build
-sam deploy \
-  --stack-name aliabab-inventory-dev \
-  --region us-east-1 \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides StageName=dev ProjectName=aliabab-inventory Region=us-east-1 DefaultPageSize=50
-```
-
-Outputs include:
-- ApiBaseUrl (copy this for frontend)
-- TableName
-
-Get the API key value created by the stack:
-
-```bash
-# List API keys (note the keyId for aliabab-inventory-dev-admin-key)
-aws apigateway get-api-keys --name-query aliabab-inventory-dev-admin-key --include-values --region us-east-1
-
-# Alternatively, if you have the id:
-aws apigateway get-api-key --api-key <keyId> --include-value --region us-east-1
-```
-
-The JSON output contains `value` which is the API key string to send in the `X-Api-Key` header.
-
-## Deploy (prod)
+From `inventory-stack/` (not this directory):
 
 ```bash
 sam build
-sam deploy \
-  --stack-name aliabab-inventory-prod \
-  --region us-east-1 \
-  --capabilities CAPABILITY_IAM \
-  --parameter-overrides StageName=prod ProjectName=aliabab-inventory Region=us-east-1 DefaultPageSize=50
+sam deploy --stack-name aliabab-inventory-dev-v2 --capabilities CAPABILITY_IAM --resolve-s3 --no-confirm-changeset
 ```
 
-For production, you should lock CORS to your domain by replacing `AllowOrigin: "*"` in `template.yaml` with your domain (e.g., `https://app.example.com`).
+## API Endpoints
 
-## API
-- GET    /products?availability=In%20Stock&limit=50&lastKey=...
-- POST   /products
-- PUT    /products/{id}
-- DELETE /products/{id}
+Base URL: `https://q5mv3u14v5.execute-api.us-east-1.amazonaws.com/Prod`
 
-Headers: `Content-Type: application/json`, `X-Api-Key: <your-api-key>`
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/products` | List all products |
+| `POST` | `/products` | Create product |
+| `GET` | `/products/{id}` | Get single product |
+| `PUT` | `/products/{id}` | Update product |
+| `DELETE` | `/products/{id}` | Delete product + images |
+| `POST` | `/upload-url` | Get presigned S3 upload URL |
+| `POST` | `/image-url` | Get presigned S3 display URL |
+| `POST` | `/barcode-lookup` | Proxy barcodelookup.com API |
+| `POST` | `/image-proxy` | Proxy external image downloads |
+
+**Auth:** `Authorization: Bearer <cognito_id_token>`
 
 ## DynamoDB
-Table name: `${ProjectName}-${StageName}` (e.g., aliabab-inventory-dev)
 
-- PK: id (S)
-- Attributes: name, description, category, price (N), barcode, availability, createdAt, updatedAt
-- GSIs:
-  - GSI1: gsi1_pk (availability) + gsi1_sk (createdAt desc)
-  - GSI2: gsi2_pk (barcode) for uniqueness lookup
+Table: `aliabab-inventory-dev-v2-InventoryTable-14VA3OM41Q0RR`
 
-Point-in-time recovery (PITR) is enabled.
-
-## Frontend integration (script.js)
-Replace the localStorage simulation with REST calls using fetch and include the API key.
-
-Example patterns:
-
-```js
-// Load
-const res = await fetch(`${API_BASE}/products?availability=In%20Stock`, {
-  headers: { 'X-Api-Key': API_KEY }
-});
-const data = await res.json();
-
-// Create
-await fetch(`${API_BASE}/products`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
-  body: JSON.stringify({ name, description, category, price, barcode, availability })
-});
-
-// Update
-await fetch(`${API_BASE}/products/${id}`, {
-  method: 'PUT',
-  headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
-  body: JSON.stringify({ name, description, category, price, barcode, availability })
-});
-
-// Delete
-await fetch(`${API_BASE}/products/${id}`, {
-  method: 'DELETE',
-  headers: { 'X-Api-Key': API_KEY }
-});
-```
-
-I kept the UI contract identical to minimize changes.
+- PK: `id` (UUID)
+- GSI1: `gsi1_pk` (availability) + `gsi1_sk` (createdAt)
+- GSI2: `gsi2_pk` (barcode) — uniqueness
 
 ## Notes
-- Upgrade auth to Cognito + JWT when ready.
-- For prod, restrict CORS and rotate API keys periodically.
-- To change default page size, update `DefaultPageSize` parameter.
+- Auth uses Cognito JWT tokens (not API keys)
+- CORS configured at API Gateway level (all origins allowed)
+- See `Save-info/How-this-works.md` for full documentation
