@@ -29,15 +29,20 @@
             <div class="sidebar-section">
                 <div class="sidebar-title">Menu</div>
                 <div class="sidebar-tabs">
-                    <button class="tab-item active" aria-current="page">Products</button>
-                    <button class="tab-item">Revenue</button>
-                    <button class="tab-item">Rewards</button>
+                    <button class="tab-item active" data-tab="products" aria-current="page" onclick="switchTab('products')">Products</button>
+                    <button class="tab-item" data-tab="receive" onclick="switchTab('receive')">Receive Inventory</button>
+                    <button class="tab-item" data-tab="audit" onclick="switchTab('audit')">Audit Logs</button>
+                    <button class="tab-item" data-tab="receive" onclick="switchTab('receive')">Inventory Add</button>
+                    <button class="tab-item" data-tab="revenue" onclick="switchTab('revenue')">Revenue</button>
+                    <button class="tab-item" data-tab="rewards" onclick="switchTab('rewards')">Rewards</button>
                 </div>
             </div>
         </div>
 
         <!-- Main Content -->
         <div class="main-content">
+            <!-- Products / Audit panel -->
+            <div id="panel-products" class="tab-panel">
             <div class="table-container">
                 <div class="table-header">
                     <h2>Product Management <span id="product-count" class="product-count-badge"></span></h2>
@@ -78,8 +83,10 @@
                             <th>Name</th>
                             <th>Description</th>
                             <th>Availability</th>
-                            <th>Barcode</th>
+                            <th>Internal Barcode</th>
+                            <th>UPC</th>
                             <th>Category</th>
+                            <th>Qty</th>
                             <th>Area</th>
                             <th>Price</th>
                             <th>Actions</th>
@@ -89,6 +96,161 @@
                         <!-- Products will be loaded here -->
                     </tbody>
                 </table>
+            </div>
+            </div><!-- /panel-products -->
+
+            <!-- Receive Inventory panel -->
+            <div id="panel-receive" class="tab-panel" style="display:none">
+                <div class="table-container">
+                    <div class="table-header">
+                        <h2>Receive Inventory</h2>
+                        <small style="color:#666;">Scan or enter a UPC to look up product details, then configure and save to your inventory.</small>
+                    </div>
+                    <div class="receive-lookup-bar">
+                        <label class="form-label">UPC Barcode</label>
+                        <div class="receive-upc-row">
+                            <input type="text" id="receive-upc-input" class="form-input" placeholder="Scan or type UPC (e.g. 012345678905)..." onkeydown="if(event.key==='Enter'){event.preventDefault();lookupReceiveUpc();}">
+                            <button type="button" class="add-product-btn" id="receive-lookup-btn" onclick="lookupReceiveUpc()">Lookup</button>
+                            <button type="button" class="add-product-btn" onclick="clearReceiveForm()">Clear</button>
+                        </div>
+                        <div id="receive-lookup-status" style="margin-top:8px;"></div>
+                    </div>
+                    <div id="receive-form-section" style="display:none;margin-top:24px;">
+                        <div class="receive-preview-card" id="receive-preview-card">
+                            <img id="receive-preview-img" src="" alt="" style="width:72px;height:72px;object-fit:contain;border-radius:8px;background:#f5f5f5;border:1px solid #eee;">
+                            <div class="receive-preview-info">
+                                <div id="receive-preview-name" style="font-weight:700;font-size:16px;"></div>
+                                <div id="receive-preview-brand" style="color:#888;font-size:13px;"></div>
+                            </div>
+                        </div>
+                        <form id="receive-form" autocomplete="off">
+                            <div class="receive-form-grid">
+                                <div class="form-group">
+                                    <label class="form-label">Name <span style="color:red">*</span></label>
+                                    <input type="text" class="form-input" id="receive-name" required>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Description</label>
+                                    <input type="text" class="form-input" id="receive-description">
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Category <span style="color:red">*</span></label>
+                                    <select class="form-select" id="receive-category" required>
+                                        <option value="option">option</option>
+                                        <option value="Fruits &amp; Veggies">Fruits &amp; Veggies</option>
+                                        <option value="Seafood">Seafood</option>
+                                        <option value="Bakery">Bakery</option>
+                                        <option value="Frozen Foods">Frozen Foods</option>
+                                        <option value="Beverages">Beverages</option>
+                                        <option value="Snacks">Snacks</option>
+                                        <option value="Infant Care">Infant Care</option>
+                                        <option value="Cereals &amp; Breakfast">Cereals &amp; Breakfast</option>
+                                        <option value="Meat &amp; Poultry">Meat &amp; Poultry</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">UPC (auto-filled)</label>
+                                    <input type="text" class="form-input" id="receive-upc-value" readonly style="background:#f5f5f5;">
+                                </div>
+                                <div class="form-group" style="grid-column:1/-1">
+                                    <label class="form-label">Internal Barcode <span style="color:red">*</span></label>
+                                    <div class="internal-barcode-row">
+                                        <input type="text" class="form-input" id="receive-internal-barcode" placeholder="Click Generate..." readonly style="flex:1;letter-spacing:2px;font-family:monospace;">
+                                        <select id="receive-barcode-digits" class="form-select" style="width:130px">
+                                            <option value="6">6 digits</option>
+                                            <option value="8" selected>8 digits</option>
+                                            <option value="10">10 digits</option>
+                                            <option value="12">12 digits</option>
+                                        </select>
+                                        <button type="button" class="add-product-btn" onclick="generateReceiveBarcode()">Generate</button>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Price ($) <span style="color:red">*</span></label>
+                                    <div class="price-wrap">
+                                        <input type="number" class="form-input price-input" id="receive-price" step="0.01" required>
+                                        <select class="form-select price-unit-select" id="receive-price-unit">
+                                            <option value="piece">per piece</option>
+                                            <option value="lb">per lb</option>
+                                            <option value="oz">per oz</option>
+                                            <option value="g">per g</option>
+                                            <option value="kg">per kg</option>
+                                            <option value="gallon">per gallon</option>
+                                            <option value="dozen">per dozen</option>
+                                            <option value="loaf">per loaf</option>
+                                            <option value="bag">per bag</option>
+                                            <option value="bags">per bags</option>
+                                            <option value="carton">per carton</option>
+                                            <option value="block">per block</option>
+                                            <option value="jar">per jar</option>
+                                            <option value="cup">per cup</option>
+                                            <option value="box">per box</option>
+                                            <option value="pack">per pack</option>
+                                            <option value="can">per can</option>
+                                            <option value="bottle">per bottle</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Area Location</label>
+                                    <select class="form-select" id="receive-area">
+                                        <option value="A1">A1</option>
+                                        <option value="A2">A2</option>
+                                        <option value="A3">A3</option>
+                                        <option value="A4">A4</option>
+                                        <option value="A5">A5</option>
+                                        <option value="A6">A6</option>
+                                        <option value="A7">A7</option>
+                                        <option value="A8">A8</option>
+                                        <option value="A9">A9</option>
+                                        <option value="A10">A10</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Availability</label>
+                                    <select class="form-select" id="receive-availability">
+                                        <option value="In Stock">In Stock</option>
+                                        <option value="Out of Stock">Out of Stock</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                    <label class="form-label">Quantity Received <span id="receive-qty-unit-hint" style="color:#888;font-weight:400"></span></label>
+                    <input type="number" class="form-input" id="receive-quantity" min="0" step="0.01" value="1" placeholder="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Low Stock Threshold</label>
+                    <input type="number" class="form-input" id="receive-low-stock-threshold" min="0" step="0.01" value="5" placeholder="5">
+                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Scale need</label>
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:14px;color:#333;">
+                                        <input type="checkbox" id="receive-scale-need"> Requires scale
+                                    </label>
+                                </div>
+                            </div>
+                        </form>
+                        <div class="modal-actions" style="border-top:1px solid #eee;padding-top:16px;margin-top:4px;">
+                            <button class="btn-cancel" onclick="clearReceiveForm()">Clear</button>
+                            <button class="btn-save" onclick="saveReceivedItem()">Add to Inventory</button>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- /panel-receive -->
+
+            <!-- Revenue placeholder -->
+            <div id="panel-revenue" class="tab-panel" style="display:none">
+                <div class="table-container">
+                    <div class="table-header"><h2>Revenue</h2></div>
+                    <p style="padding:24px;color:#666;">Revenue analytics coming soon.</p>
+                </div>
+            </div>
+
+            <!-- Rewards placeholder -->
+            <div id="panel-rewards" class="tab-panel" style="display:none">
+                <div class="table-container">
+                    <div class="table-header"><h2>Rewards</h2></div>
+                    <p style="padding:24px;color:#666;">Rewards program coming soon.</p>
+                </div>
             </div>
         </div>
     </div>
@@ -158,8 +320,21 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Barcode</label>
-                    <input type="text" class="form-input" id="product-barcode" required>
+                    <label class="form-label">UPC (Universal Product Code)</label>
+                    <input type="text" class="form-input" id="product-upc" placeholder="e.g. 012345678905">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Internal Barcode <span style="color:red">*</span></label>
+                    <div class="internal-barcode-row">
+                        <input type="text" class="form-input" id="product-internal-barcode" placeholder="Auto-generated" required style="flex:1;letter-spacing:2px;font-family:monospace;">
+                        <select id="product-barcode-digits" class="form-select" style="width:130px">
+                            <option value="6">6 digits</option>
+                            <option value="8" selected>8 digits</option>
+                            <option value="10">10 digits</option>
+                            <option value="12">12 digits</option>
+                        </select>
+                        <button type="button" class="add-product-btn" onclick="generateAndFillInternalBarcode()">Generate</button>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -168,6 +343,15 @@
                         <option value="In Stock">In Stock</option>
                         <option value="Out of Stock">Out of Stock</option>
                     </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Quantity in Stock <span id="product-qty-unit-hint" style="color:#888;font-weight:400"></span></label>
+                    <input type="number" class="form-input" id="product-quantity" min="0" step="0.01" value="0" placeholder="0">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Low Stock Alert Threshold <span style="color:#888;font-weight:400">(trigger restock reminder)</span></label>
+                    <input type="number" class="form-input" id="product-low-stock-threshold" min="0" step="0.01" value="5" placeholder="5">
                 </div>
 
                 <div class="form-group">

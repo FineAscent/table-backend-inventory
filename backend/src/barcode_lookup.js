@@ -1,9 +1,9 @@
 /**
- * Lambda proxy for barcodelookup.com API.
- * Bypasses CORS restrictions by making the API call server-side.
+ * Lambda proxy for UPC barcode lookup.
+ * No API key required — uses UPCitemdb (100/day free) with Open Food Facts fallback.
  *
- * Expects POST body: { barcode: "...", apiKey: "..." }
- * Returns the barcodelookup.com JSON response.
+ * Expects POST body: { barcode: "..." }
+ * Returns: { products: [{ name, description, brand, category, barcode_number, images }] }
  */
 
 const headers = {
@@ -13,59 +13,82 @@ const headers = {
 };
 
 exports.handler = async (event) => {
-    // Handle CORS preflight
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
     }
 
     try {
         const body = JSON.parse(event.body || '{}');
-        const { barcode, apiKey } = body;
+        const { barcode } = body;
 
         if (!barcode || typeof barcode !== 'string') {
-            return {
-                statusCode: 400,
-                headers,
-                body: JSON.stringify({ message: 'barcode is required' })
-            };
+            return { statusCode: 400, headers, body: JSON.stringify({ message: 'barcode is required' }) };
         }
 
-        if (!apiKey || typeof apiKey !== 'string') {
-            return {
-                statusCode: 400,
-                headers,
-                body: JSON.stringify({ message: 'apiKey is required' })
-            };
-        }
-
-        // Clean barcode (digits only)
         const cleanBarcode = barcode.trim().replace(/[^0-9]/g, '');
         if (cleanBarcode.length < 6) {
-            return {
-                statusCode: 400,
-                headers,
-                body: JSON.stringify({ message: 'barcode must be at least 6 digits' })
-            };
+            return { statusCode: 400, headers, body: JSON.stringify({ message: 'barcode must be at least 6 digits' }) };
         }
 
-        // Call barcodelookup.com API server-side (no CORS issues)
-        const apiUrl = `https://api.barcodelookup.com/v3/products?barcode=${encodeURIComponent(cleanBarcode)}&formatted=y&key=${encodeURIComponent(apiKey.trim())}`;
+        // --- Source 1: UPCitemdb (100 free lookups/day, no key) ---
+        try {
+            const upcResp = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${cleanBarcode}`, {
+                headers: { 'Accept': 'application/json' }
+            });
+            console.log(`upcitemdb: ${upcResp.status}`);
+            if (upcResp.ok) {
+                const data = await upcResp.json();
+                if (data.items && data.items.length > 0) {
+                    const item = data.items[0];
+                    return {
+                        statusCode: 200, headers,
+                        body: JSON.stringify({
+                            products: [{
+                                name: item.title || '',
+                                description: item.description || '',
+                                brand: item.brand || '',
+                                category: item.category || '',
+                                barcode_number: cleanBarcode,
+                                images: item.images || []
+                            }]
+                        })
+                    };
+                }
+            }
+        } catch (e) { console.log('upcitemdb error:', e.message); }
 
-        const resp = await fetch(apiUrl);
-        const text = await resp.text();
+        // --- Source 2: Open Food Facts (unlimited free, food products) ---
+        try {
+            const offResp = await fetch(
+                `https://world.openfoodfacts.org/api/v2/product/${cleanBarcode}.json?fields=product_name,brands,categories,image_url,ingredients_text`,
+                { headers: { 'Accept': 'application/json' } }
+            );
+            console.log(`openfoodfacts: ${offResp.status}`);
+            if (offResp.ok) {
+                const data = await offResp.json();
+                if (data.status === 1 && data.product) {
+                    const p = data.product;
+                    return {
+                        statusCode: 200, headers,
+                        body: JSON.stringify({
+                            products: [{
+                                name: p.product_name || '',
+                                description: p.ingredients_text || '',
+                                brand: p.brands || '',
+                                category: p.categories || '',
+                                barcode_number: cleanBarcode,
+                                images: p.image_url ? [p.image_url] : []
+                            }]
+                        })
+                    };
+                }
+            }
+        } catch (e) { console.log('openfoodfacts error:', e.message); }
 
-        // Forward the response status and body
-        return {
-            statusCode: resp.status,
-            headers,
-            body: text
-        };
+        return { statusCode: 404, headers, body: JSON.stringify({ message: 'Product not found for this barcode.' }) };
+
     } catch (err) {
         console.error('Barcode lookup proxy error:', err);
-        return {
-            statusCode: 500,
-            headers,
-            body: JSON.stringify({ message: 'Barcode lookup proxy failed', error: err.message })
-        };
+        return { statusCode: 500, headers, body: JSON.stringify({ message: 'Lookup failed', error: err.message }) };
     }
 };

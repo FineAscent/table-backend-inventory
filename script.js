@@ -619,17 +619,13 @@ async function ensureBarcodeLookupKeyOrPrompt() {
     return getBarcodeLookupApiKey();
 }
 
-// Core lookup function — calls our Lambda proxy which fetches from barcodelookup.com server-side
+// Core lookup function — calls our Lambda proxy (UPCitemdb + Open Food Facts, no API key needed)
 async function fetchBarcodeLookup(barcode) {
-    const apiKey = await ensureBarcodeLookupKeyOrPrompt();
-    if (!apiKey) throw new Error('API key is required. Please set your Barcode Lookup API key.');
-
     const cleanBarcode = (barcode || '').trim().replace(/[^0-9]/g, '');
     if (!cleanBarcode || cleanBarcode.length < 6) {
         throw new Error('Please enter a valid barcode (at least 6 digits).');
     }
 
-    // Call our Lambda proxy (bypasses CORS)
     const proxyUrl = `${API_BASE_URL}/barcode-lookup`;
     const headers = { 'Content-Type': 'application/json' };
     const token = getIdToken();
@@ -638,12 +634,9 @@ async function fetchBarcodeLookup(barcode) {
     const resp = await fetch(proxyUrl, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ barcode: cleanBarcode, apiKey })
+        body: JSON.stringify({ barcode: cleanBarcode })
     });
 
-    if (resp.status === 403) {
-        throw new Error('Invalid API key. Check your Barcode Lookup API key.');
-    }
     if (resp.status === 404) {
         throw new Error('Product not found for this barcode.');
     }
@@ -657,7 +650,7 @@ async function fetchBarcodeLookup(barcode) {
     if (!products || !products.length) {
         throw new Error('No product data returned for this barcode.');
     }
-    return products[0]; // return first match
+    return products[0];
 }
 
 // Parse API response into a clean product object
@@ -1094,6 +1087,157 @@ document.addEventListener('DOMContentLoaded', function () {
     loadProducts();
 });
 
+// =====================
+// Tab switching
+// =====================
+function switchTab(name) {
+    const panelName = (name === 'audit') ? 'products' : name;
+    document.querySelectorAll('.tab-panel').forEach(p => { p.style.display = 'none'; });
+    const panel = document.getElementById('panel-' + panelName);
+    if (panel) panel.style.display = '';
+    const productsPanel = document.getElementById('panel-products');
+    if (productsPanel) {
+        if (name === 'audit') {
+            productsPanel.classList.add('audit-mode');
+        } else {
+            productsPanel.classList.remove('audit-mode');
+        }
+    }
+    document.querySelectorAll('.tab-item').forEach(btn => {
+        btn.classList.remove('active');
+        btn.removeAttribute('aria-current');
+    });
+    document.querySelectorAll('.tab-item[data-tab="' + name + '"]').forEach(btn => {
+        btn.classList.add('active');
+        btn.setAttribute('aria-current', 'page');
+    });
+}
+
+// =====================
+// Internal barcode generation
+// =====================
+function generateInternalBarcode(digits) {
+    const d = parseInt(digits) || 8;
+    let result = '';
+    for (let i = 0; i < d; i++) {
+        result += Math.floor(Math.random() * 10).toString();
+    }
+    if (result[0] === '0') result = (Math.floor(Math.random() * 9) + 1).toString() + result.slice(1);
+    return result;
+}
+
+function generateReceiveBarcode() {
+    const digits = parseInt(document.getElementById('receive-barcode-digits')?.value) || 8;
+    const code = generateInternalBarcode(digits);
+    const input = document.getElementById('receive-internal-barcode');
+    if (input) input.value = code;
+}
+
+function generateAndFillInternalBarcode() {
+    const digits = parseInt(document.getElementById('product-barcode-digits')?.value) || 8;
+    const code = generateInternalBarcode(digits);
+    const input = document.getElementById('product-internal-barcode');
+    if (input) input.value = code;
+}
+
+// =====================
+// Receive Inventory flow
+// =====================
+async function lookupReceiveUpc() {
+    const upcInput = document.getElementById('receive-upc-input');
+    const barcode = (upcInput?.value || '').trim();
+    const statusEl = document.getElementById('receive-lookup-status');
+    if (!barcode) {
+        statusEl.innerHTML = '<span style="color:red">Enter a UPC barcode first.</span>';
+        return;
+    }
+    const btn = document.getElementById('receive-lookup-btn');
+    statusEl.innerHTML = '<span style="color:#888">Looking up UPC...</span>';
+    if (btn) btn.disabled = true;
+    try {
+        const result = await fetchBarcodeLookup(barcode);
+        statusEl.innerHTML = '';
+        document.getElementById('receive-preview-name').textContent = result.name || '';
+        document.getElementById('receive-preview-brand').textContent = result.brand || '';
+        const img = document.getElementById('receive-preview-img');
+        if (img) {
+            img.src = result.imageUrl || '';
+            img.style.display = result.imageUrl ? '' : 'none';
+        }
+        document.getElementById('receive-name').value = result.name || '';
+        document.getElementById('receive-description').value = result.description || result.brand || '';
+        document.getElementById('receive-upc-value').value = barcode;
+        const catMap = {
+            'produce': 'Fruits & Veggies', 'fruit': 'Fruits & Veggies', 'vegetable': 'Fruits & Veggies',
+            'beverage': 'Beverages', 'drink': 'Beverages',
+            'bakery': 'Bakery', 'bread': 'Bakery',
+            'seafood': 'Seafood', 'fish': 'Seafood',
+            'frozen': 'Frozen Foods',
+            'cereal': 'Cereals & Breakfast', 'breakfast': 'Cereals & Breakfast',
+            'meat': 'Meat & Poultry', 'poultry': 'Meat & Poultry',
+            'infant': 'Infant Care', 'baby': 'Infant Care',
+            'snack': 'Snacks', 'food': 'Snacks'
+        };
+        const catEl = document.getElementById('receive-category');
+        if (catEl && result.category) {
+            const lc = (result.category || '').toLowerCase();
+            let matched = 'option';
+            for (const [k, v] of Object.entries(catMap)) {
+                if (lc.includes(k)) { matched = v; break; }
+            }
+            catEl.value = matched;
+        }
+        generateReceiveBarcode();
+        document.getElementById('receive-form-section').style.display = '';
+    } catch (err) {
+        statusEl.innerHTML = '<span style="color:red">Lookup failed: ' + (err.message || err) + '</span>';
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function saveReceivedItem() {
+    const name = (document.getElementById('receive-name')?.value || '').trim();
+    const internalBarcode = (document.getElementById('receive-internal-barcode')?.value || '').trim();
+    const price = parseFloat(document.getElementById('receive-price')?.value);
+    const statusEl = document.getElementById('receive-lookup-status');
+    if (!name) { statusEl.innerHTML = '<span style="color:red">Name is required.</span>'; return; }
+    if (!internalBarcode) { statusEl.innerHTML = '<span style="color:red">Generate an internal barcode first.</span>'; return; }
+    if (isNaN(price) || price < 0) { statusEl.innerHTML = '<span style="color:red">Enter a valid price.</span>'; return; }
+    statusEl.innerHTML = '<span style="color:#888">Saving...</span>';
+    try {
+        await dbService.putProduct({
+            name,
+            description: (document.getElementById('receive-description')?.value || '').trim(),
+            category: document.getElementById('receive-category')?.value || 'option',
+            price,
+            priceUnit: document.getElementById('receive-price-unit')?.value || 'piece',
+            upc: (document.getElementById('receive-upc-value')?.value || '').trim(),
+            internalBarcode,
+            quantity: parseFloat(document.getElementById('receive-quantity')?.value) || 0,
+            lowStockThreshold: parseFloat(document.getElementById('receive-low-stock-threshold')?.value) || 5,
+            availability: document.getElementById('receive-availability')?.value || 'In Stock',
+            areaLocation: document.getElementById('receive-area')?.value || 'A1',
+            scaleNeed: document.getElementById('receive-scale-need')?.checked === true,
+            imageKeys: []
+        });
+        statusEl.innerHTML = '<span style="color:#52c41a">✓ Item added to inventory!</span>';
+        loadProducts();
+        setTimeout(() => { clearReceiveForm(); }, 2500);
+    } catch (err) {
+        statusEl.innerHTML = '<span style="color:red">Save failed: ' + (err.message || err) + '</span>';
+    }
+}
+
+function clearReceiveForm() {
+    const upcInput = document.getElementById('receive-upc-input');
+    if (upcInput) upcInput.value = '';
+    document.getElementById('receive-form-section').style.display = 'none';
+    document.getElementById('receive-lookup-status').innerHTML = '';
+    const form = document.getElementById('receive-form');
+    if (form) form.reset();
+}
+
 // Backend service (uses deployed API)
 class DynamoDBService {
     constructor() {
@@ -1134,7 +1278,10 @@ class DynamoDBService {
             category: product.category,
             price: Number(product.price),
             priceUnit: product.priceUnit || 'piece',
-            barcode: product.barcode,
+            upc: product.upc || product.barcode || '',
+            internalBarcode: product.internalBarcode || product.barcode || '',
+            quantity: typeof product.quantity === 'number' ? product.quantity : (parseFloat(product.quantity) || 0),
+            lowStockThreshold: typeof product.lowStockThreshold === 'number' ? product.lowStockThreshold : (parseFloat(product.lowStockThreshold) || 5),
             availability: product.availability,
             areaLocation: product.areaLocation || 'A1',
             scaleNeed: product.scaleNeed === true,
@@ -1236,6 +1383,20 @@ async function loadProducts() {
     }
 }
 
+// Returns a colored stock-level badge for the Qty table cell
+function renderStockLevel(product) {
+    const qty = product.quantity;
+    const threshold = product.lowStockThreshold !== undefined ? product.lowStockThreshold : 5;
+    const unit = product.priceUnit || 'pcs';
+    const isWeight = ['lb', 'oz', 'g', 'kg'].includes(unit);
+    const display = qty === undefined ? '—' : (isWeight ? `${qty} ${unit}` : `${qty} ${unit === 'piece' ? 'pcs' : unit}`);
+
+    if (qty === undefined) return `<span class="stock-badge stock-unknown">—</span>`;
+    if (qty <= 0) return `<span class="stock-badge stock-out">Out ${display}</span>`;
+    if (qty <= threshold) return `<span class="stock-badge stock-low">Low ${display}</span>`;
+    return `<span class="stock-badge stock-ok">${display}</span>`;
+}
+
 // Render products in the table
 function renderProducts() {
     const tbody = document.getElementById('products-tbody');
@@ -1259,8 +1420,10 @@ function renderProducts() {
                     <td><span class="product-name">${product.name}</span></td>
                     <td>${product.description}</td>
                     <td><span class="status-badge ${product.availability === 'In Stock' ? 'status-in-stock' : 'status-out-of-stock'}">${product.availability}</span></td>
-                    <td>${product.barcode}</td>
+                    <td style="font-family:monospace">${product.internalBarcode || product.barcode || '—'}</td>
+                    <td style="color:#888;font-size:12px">${product.upc || '—'}</td>
                     <td>${product.category}</td>
+                    <td>${renderStockLevel(product)}</td>
                     <td>${product.areaLocation || 'A1'}</td>
                     <td><span class="price">$${product.price.toFixed(2)} / ${unitLabel}</span></td>
                     <td>
@@ -1334,7 +1497,7 @@ function applyFilters(products) {
         // Text search filter (name or barcode)
         if (term) {
             const name = (product.name || '').toLowerCase();
-            const barcode = (product.barcode || '').toLowerCase();
+            const barcode = ((product.internalBarcode || product.barcode || '') + ' ' + (product.upc || '')).toLowerCase();
             if (!name.includes(term) && !barcode.includes(term)) return false;
         }
         return true;
@@ -1428,8 +1591,17 @@ function editProduct(id) {
         document.getElementById('product-price').value = product.price;
         const unitEl = document.getElementById('product-price-unit');
         if (unitEl) unitEl.value = product.priceUnit || 'piece';
-        document.getElementById('product-barcode').value = product.barcode;
+        const upcEl = document.getElementById('product-upc');
+        if (upcEl) upcEl.value = product.upc || product.barcode || '';
+        const intBarcodeEl = document.getElementById('product-internal-barcode');
+        if (intBarcodeEl) intBarcodeEl.value = product.internalBarcode || product.barcode || '';
         document.getElementById('product-availability').value = product.availability;
+        const qtyEl = document.getElementById('product-quantity');
+        if (qtyEl) qtyEl.value = product.quantity !== undefined ? product.quantity : 0;
+        const lstEl = document.getElementById('product-low-stock-threshold');
+        if (lstEl) lstEl.value = product.lowStockThreshold !== undefined ? product.lowStockThreshold : 5;
+        const qtyHintEl = document.getElementById('product-qty-unit-hint');
+        if (qtyHintEl) qtyHintEl.textContent = product.priceUnit ? `(${product.priceUnit})` : '';
         const areaEl = document.getElementById('product-area');
         if (areaEl) areaEl.value = product.areaLocation || 'A1';
         const scaleEl = document.getElementById('product-scale-need');
@@ -1474,7 +1646,10 @@ async function saveProduct() {
             category: document.getElementById('product-category').value,
             price: parseFloat(document.getElementById('product-price').value),
             priceUnit: (document.getElementById('product-price-unit') && document.getElementById('product-price-unit').value) || 'piece',
-            barcode: document.getElementById('product-barcode').value,
+            upc: (document.getElementById('product-upc')?.value || '').trim(),
+            internalBarcode: (document.getElementById('product-internal-barcode')?.value || '').trim(),
+            quantity: parseFloat(document.getElementById('product-quantity')?.value) || 0,
+            lowStockThreshold: parseFloat(document.getElementById('product-low-stock-threshold')?.value) || 5,
             availability: document.getElementById('product-availability').value,
             areaLocation: (document.getElementById('product-area') && document.getElementById('product-area').value) || 'A1',
             scaleNeed: (document.getElementById('product-scale-need') && document.getElementById('product-scale-need').checked) === true,

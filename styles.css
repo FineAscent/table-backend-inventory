@@ -1067,3 +1067,109 @@
       opacity: 0.5;
       cursor: not-allowed;
   }
+
+  /* =====================
+     Tab panels
+  ===================== */
+  .tab-panel {
+      width: 100%;
+  }
+
+  /* Audit mode: hide all add/import/action buttons */
+  .audit-mode .add-product-btn,
+  .audit-mode .import-csv-btn,
+  .audit-mode .barcode-scan-btn {
+      display: none;
+  }
+
+  /* =====================
+     Receive Inventory panel
+  ===================== */
+  .receive-lookup-bar {
+      padding: 20px 24px 16px;
+      border-bottom: 1px solid #f0f0f0;
+  }
+
+  .receive-upc-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-top: 6px;
+  }
+
+  .receive-upc-row .form-input {
+      flex: 1;
+      max-width: 420px;
+  }
+
+  .receive-preview-card {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px 24px;
+      background: #f9fafb;
+      border-radius: 8px;
+      border: 1px solid #e5e7eb;
+      margin: 0 24px 20px;
+  }
+
+  .receive-preview-info {
+      flex: 1;
+  }
+
+  .receive-form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0 24px;
+      padding: 0 24px;
+  }
+
+  .receive-form-grid .form-group {
+      margin-bottom: 14px;
+  }
+
+  .internal-barcode-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+  }
+
+  .internal-barcode-row .form-input {
+      flex: 1;
+  }
+
+  /* =====================
+     Stock level badges
+  ===================== */
+  .stock-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+  }
+
+  .stock-ok {
+      background: #f0fdf4;
+      color: #15803d;
+      border: 1px solid #86efac;
+  }
+
+  .stock-low {
+      background: #fffbeb;
+      color: #b45309;
+      border: 1px solid #fcd34d;
+  }
+
+  .stock-out {
+      background: #fef2f2;
+      color: #b91c1c;
+      border: 1px solid #fca5a5;
+  }
+
+  .stock-unknown {
+      background: #f3f4f6;
+      color: #9ca3af;
+      border: 1px solid #e5e7eb;
+  }

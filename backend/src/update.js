@@ -11,7 +11,7 @@ const headers = {
 };
 
 function validate(body) {
-  const required = ['name', 'description', 'category', 'price', 'barcode', 'availability'];
+  const required = ['name', 'description', 'category', 'price', 'internalBarcode', 'availability'];
   for (const k of required) {
     if (body[k] === undefined || body[k] === null || body[k] === '') {
       return `${k} is required`;
@@ -84,16 +84,16 @@ exports.handler = async (event) => {
       return { statusCode: 404, headers, body: JSON.stringify({ message: 'Not found' }) };
     }
 
-    // If barcode changed, enforce uniqueness
-    if (current.Item.barcode !== body.barcode) {
+    // If internalBarcode changed, enforce uniqueness
+    if (current.Item.internalBarcode !== body.internalBarcode) {
       const exist = await ddb.query({
         TableName: TABLE_NAME,
         IndexName: 'GSI2',
         KeyConditionExpression: 'gsi2_pk = :b',
-        ExpressionAttributeValues: { ':b': body.barcode }
+        ExpressionAttributeValues: { ':b': body.internalBarcode }
       }).promise();
       if (exist.Count && exist.Items && exist.Items.length > 0) {
-        return { statusCode: 409, headers, body: JSON.stringify({ message: 'Barcode already exists' }) };
+        return { statusCode: 409, headers, body: JSON.stringify({ message: 'Internal barcode already exists' }) };
       }
     }
 
@@ -123,14 +123,17 @@ exports.handler = async (event) => {
       category: normalizeCategory(body.category),
       price: body.price,
       priceUnit: body.priceUnit || current.Item.priceUnit || 'piece',
-      barcode: body.barcode,
+      upc: (body.upc !== undefined) ? body.upc : (current.Item.upc || ''),
+      internalBarcode: body.internalBarcode,
+      quantity: typeof body.quantity === 'number' ? Math.max(0, body.quantity) : (current.Item.quantity || 0),
+      lowStockThreshold: typeof body.lowStockThreshold === 'number' ? Math.max(0, body.lowStockThreshold) : (current.Item.lowStockThreshold !== undefined ? current.Item.lowStockThreshold : 5),
       availability: body.availability,
       areaLocation: body.areaLocation || current.Item.areaLocation || 'A1',
       scaleNeed: (typeof body.scaleNeed === 'boolean') ? body.scaleNeed : (current.Item.scaleNeed === true),
       updatedAt: now,
       gsi1_pk: body.availability,
       gsi1_sk: current.Item.createdAt || now,
-      gsi2_pk: body.barcode,
+      gsi2_pk: body.internalBarcode,
       imageKeys: finalKeys,
       allergySummary: (body.allergySummary !== undefined) ? body.allergySummary : (current.Item.allergySummary || 'none')
     };

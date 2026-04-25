@@ -267,6 +267,22 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
 
+  BarcodeLookupFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src
+      Handler: barcode_lookup.handler
+      Description: Proxy for barcodelookup.com API to bypass CORS
+      Events:
+        PostBarcodeLookup:
+          Type: Api
+          Properties:
+            RestApiId: !Ref Api
+            Path: /barcode-lookup
+            Method: POST
+            Auth:
+              Authorizer: CognitoAuthorizer
+
   GetUploadUrlFunction:
     Type: AWS::Serverless::Function
     Properties:

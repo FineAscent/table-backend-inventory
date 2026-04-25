@@ -18,7 +18,7 @@ function ulid() {
 }
 
 function validate(body) {
-  const required = ['name', 'description', 'category', 'price', 'barcode', 'availability'];
+  const required = ['name', 'description', 'category', 'price', 'internalBarcode', 'availability'];
   for (const k of required) {
     if (body[k] === undefined || body[k] === null || body[k] === '') {
       return `${k} is required`;
@@ -74,15 +74,15 @@ exports.handler = async (event) => {
       return { statusCode: 400, headers, body: JSON.stringify({ message: err }) };
     }
 
-    // Enforce barcode uniqueness via GSI2
+    // Enforce internalBarcode uniqueness via GSI2
     const existing = await ddb.query({
       TableName: TABLE_NAME,
       IndexName: 'GSI2',
       KeyConditionExpression: 'gsi2_pk = :b',
-      ExpressionAttributeValues: { ':b': body.barcode }
+      ExpressionAttributeValues: { ':b': body.internalBarcode }
     }).promise();
     if (existing.Count && existing.Items && existing.Items.length > 0) {
-      return { statusCode: 409, headers, body: JSON.stringify({ message: 'Barcode already exists' }) };
+      return { statusCode: 409, headers, body: JSON.stringify({ message: 'Internal barcode already exists' }) };
     }
 
     const now = new Date().toISOString();
@@ -93,7 +93,10 @@ exports.handler = async (event) => {
       category: normalizeCategory(body.category),
       price: body.price,
       priceUnit: body.priceUnit || 'piece',
-      barcode: body.barcode,
+      upc: body.upc || '',
+      internalBarcode: body.internalBarcode,
+      quantity: typeof body.quantity === 'number' ? Math.max(0, body.quantity) : 0,
+      lowStockThreshold: typeof body.lowStockThreshold === 'number' ? Math.max(0, body.lowStockThreshold) : 5,
       availability: body.availability,
       areaLocation: body.areaLocation || 'A1',
       scaleNeed: body.scaleNeed === true ? true : false,
@@ -101,7 +104,7 @@ exports.handler = async (event) => {
       updatedAt: now,
       gsi1_pk: body.availability,
       gsi1_sk: now,
-      gsi2_pk: body.barcode,
+      gsi2_pk: body.internalBarcode,
       imageKeys: Array.isArray(body.imageKeys) ? body.imageKeys : [],
       allergySummary: body.allergySummary || 'none'
     };
