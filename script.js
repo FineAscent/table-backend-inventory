@@ -1,9 +1,10 @@
 // Backend API Configuration
 const API_BASE_URL = 'https://q5mv3u14v5.execute-api.us-east-1.amazonaws.com/Prod';
+window.API_BASE_URL = API_BASE_URL;
 
 // Cognito (Admin) Auth Configuration
-const COGNITO_DOMAIN = 'https://aliabab-inventory-v2-dev-admin.auth.us-east-1.amazoncognito.com';
-const COGNITO_CLIENT_ID = 'qt6k424dfsjk1u2p9jq7t4sdp';
+const COGNITO_DOMAIN = 'https://store-alibaba-inventory-dev-admin.auth.us-east-1.amazoncognito.com';
+const COGNITO_CLIENT_ID = '7lop8c4imce82rgrh9sn1mb009';
 const REDIRECT_URI = 'https://fineascent.github.io/table-backend-inventory/';
 
 // Simple auth state helpers
@@ -44,18 +45,24 @@ async function searchPixabayImages(query, { tokens = [], negative = [], useWhite
         const nset = new Set((negative || []).map(t => t.toLowerCase()));
         const scored = hits.map(h => {
             const tags = (h.tags || '').toLowerCase();
-            let score = 0;
-            if (tags.includes('isolated')) score += 3;
-            if (tags.includes('white')) score += 2;
-            for (const t of tset) if (t && tags.includes(t)) score += 4;
+            const matched = countNameTokenHits(tags, tset);
+            let score = matched * 8;
+            if (tset.size && matched === tset.size) score += 12;
+            if (tset.size && matched === 0) score -= 20;
+            if (tags.includes('isolated')) score += 2;
+            if (tags.includes('white')) score += 1;
             score += Math.min(4, Math.floor(((h.imageWidth || 0) + (h.imageHeight || 0)) / 1000));
             score += Math.min(5, (h.likes || 0) / 50);
             for (const n of nset) if (n && tags.includes(n)) score -= 5;
-            return { url: (h.largeImageURL || h.webformatURL || ''), score };
-        }).filter(x => x.url).sort((a, b) => b.score - a.score);
+            const url = h.largeImageURL || h.webformatURL || '';
+            if (typeof assignedImageUrlsSession !== 'undefined' && assignedImageUrlsSession.has(url)) score -= 10;
+            return { url, score, matched };
+        }).filter(x => x.url);
+        const nameHits = scored.filter(x => x.matched > 0);
+        const ranked = (nameHits.length ? nameHits : scored).sort((a, b) => b.score - a.score);
         const unique = [];
         const seen = new Set();
-        for (const s of scored) {
+        for (const s of ranked) {
             if (!seen.has(s.url)) { seen.add(s.url); unique.push(s.url); }
             if (unique.length >= limit) break;
         }
@@ -73,28 +80,28 @@ async function searchUnsplashImages(query, limit = 8) {
         if (!resp.ok) return [];
         const data = await resp.json();
         const results = (data && data.results) || [];
+        const tokens = buildNameTokens(query);
         const unique = [];
         const seen = new Set();
         for (const r of results) {
             const u = (r.urls && (r.urls.full || r.urls.regular)) || '';
-            if (!u) continue;
-            const desc = (r.alt_description || '').toLowerCase();
-            // prefer white background by ordering
-            const bias = (desc.includes('white background') ? 1 : 0);
-            if (!seen.has(u)) { seen.add(u); unique.push({ u, bias }); }
+            if (!u || seen.has(u)) continue;
+            seen.add(u);
+            const desc = `${r.alt_description || ''} ${(r.description || '')}`.toLowerCase();
+            const matched = countNameTokenHits(desc, new Set(tokens));
+            unique.push({ u, matched });
         }
-        unique.sort((a, b) => b.bias - a.bias);
-        return unique.map(x => x.u).slice(0, limit);
+        const nameHits = unique.filter(x => x.matched > 0);
+        const ranked = (nameHits.length ? nameHits : unique).sort((a, b) => b.matched - a.matched);
+        return ranked.map(x => x.u).slice(0, limit);
     } catch (_) { return []; }
 }
 
 async function suggestImagesForCurrentProduct() {
     try {
         const name = (document.getElementById('product-name')?.value || '').trim();
-        const category = (document.getElementById('product-category')?.value || '').trim();
-        const description = (document.getElementById('product-description')?.value || '').trim();
-        if (!name && !category) {
-            showError('Enter name or category first to get suggestions.');
+        if (!name) {
+            showError('Enter a product name first to get suggestions.');
             return;
         }
         // Clear previous and show loading state
@@ -103,33 +110,18 @@ async function suggestImagesForCurrentProduct() {
         // Ensure keys
         const hasPixabay = !!(await ensurePixabayKeyOrPrompt());
         const unsplashKey = window.localStorage.getItem('unsplash_access_key') || '';
-        const tokens = buildTokens(name, category, description);
-        const negatives = [];
-        if (!tokens.includes('rice')) negatives.push('rice');
-        const variants = buildQueryVariants(name, category, description);
+        const tokens = buildNameTokens(name);
+        const variants = buildQueryVariants(name);
         let urls = [];
         if (hasPixabay) {
             for (const v of variants) {
-                urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: true, includeCategory: true }, 12);
+                urls = await searchPixabayImages(v, { tokens, useWhiteFilter: false, includeCategory: false }, 12);
                 if (urls.length) break;
             }
             if (urls.length === 0) {
                 for (const v of variants) {
-                    urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: false, includeCategory: true }, 12);
+                    urls = await searchPixabayImages(v, { tokens, useWhiteFilter: false, includeCategory: true }, 12);
                     if (urls.length) break;
-                }
-            }
-            if (urls.length === 0) {
-                // Try again without category=food (Pixabay sometimes mislabels)
-                for (const v of variants) {
-                    urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: true, includeCategory: false }, 12);
-                    if (urls.length) break;
-                }
-                if (urls.length === 0) {
-                    for (const v of variants) {
-                        urls = await searchPixabayImages(v, { tokens, negative: negatives, useWhiteFilter: false, includeCategory: false }, 12);
-                        if (urls.length) break;
-                    }
                 }
             }
         }
@@ -185,13 +177,13 @@ function renderSuggestedImages(urls) {
 async function pickSuggestedImage(slot, imgUrl) {
     try {
         const name = (document.getElementById('product-name')?.value || 'image').trim();
-        // Fetch and process to 760x600 white JPEG, but do NOT upload yet; prepare for Save
+        // Fetch and process to 760x600 PNG preserving transparency, but do NOT upload yet; prepare for Save
         const resp = await fetch(imgUrl, { mode: 'cors' });
         if (!resp.ok) throw new Error('fetch failed');
         const orig = await resp.blob();
-        const processed = await renderToFixedCanvasJpeg(orig, 760, 600, 0.9);
+        const processed = await renderToFixedCanvasPng(orig, 760, 600);
         if (!processed) throw new Error('process failed');
-        const file = new File([processed], `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image'}-${Date.now()}.jpg`, { type: 'image/jpeg' });
+        const file = new File([processed], `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image'}-${Date.now()}.png`, { type: 'image/png' });
         const url = URL.createObjectURL(processed);
         // If replacing an existing persisted image, mark it for deletion
         const prev = selectedImages[slot];
@@ -224,20 +216,13 @@ function attachSuggestionAutoRefresh() {
         // Detach previous if present
         if (typeof detachSuggestListeners === 'function') detachSuggestListeners();
         const nameEl = document.getElementById('product-name');
-        const catEl = document.getElementById('product-category');
-        const descEl = document.getElementById('product-description');
         const handler = debounce(() => {
             const hasName = (nameEl?.value || '').trim().length > 0;
-            const hasCat = (catEl?.value || '').trim().length > 0;
-            if (hasName || hasCat) suggestImagesForCurrentProduct();
+            if (hasName) suggestImagesForCurrentProduct();
         }, 500);
         nameEl && nameEl.addEventListener('input', handler);
-        catEl && catEl.addEventListener('change', handler);
-        descEl && descEl.addEventListener('input', handler);
         detachSuggestListeners = () => {
             try { nameEl && nameEl.removeEventListener('input', handler); } catch (_) { }
-            try { catEl && catEl.removeEventListener('change', handler); } catch (_) { }
-            try { descEl && descEl.removeEventListener('input', handler); } catch (_) { }
         };
     } catch (_) { /* ignore */ }
 }
@@ -265,56 +250,37 @@ async function ensurePixabayKeyOrPrompt() {
     return getPixabayApiKey();
 }
 
-function buildTokens(name, category, description) {
-    const text = [name, category, description].filter(Boolean).join(' ').toLowerCase();
-    const stop = new Set(['the', 'a', 'an', 'of', 'and', 'or', 'with', 'for', 'on', 'in', 'by', 'pack', 'pcs', 'piece', 'pieces']);
-    return Array.from(new Set(text
-        .replace(/[^a-z0-9\s]/g, ' ')
+function cleanProductName(name) {
+    return (name || '')
+        .replace(/\([^)]*\)/g, ' ')
+        .replace(/\b\d+\s*(ct|pk|lb|lbs|oz|g|kg|pack|count)\b/gi, ' ')
+        .replace(/[^a-zA-Z0-9\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function buildNameTokens(name) {
+    const stop = new Set(['the', 'a', 'an', 'of', 'and', 'or', 'with', 'for', 'pack', 'pcs', 'piece', 'pieces', 'fresh']);
+    return Array.from(new Set(cleanProductName(name).toLowerCase()
         .split(/\s+/)
         .filter(w => w && !stop.has(w) && w.length >= 3)));
 }
 
-function pluralizeSimple(n) {
-    const s = (n || '').toLowerCase();
-    if (!s) return s;
-    if (s.endsWith('s')) return s; // already plural or ends with s
-    if (s.endsWith('y')) return s.slice(0, -1) + 'ies';
-    if (s.endsWith('ch') || s.endsWith('sh') || s.endsWith('x') || s.endsWith('z')) return s + 'es';
-    return s + 's';
+function countNameTokenHits(text, tokens) {
+    const hay = (text || '').toLowerCase();
+    let matched = 0;
+    for (const t of tokens) {
+        if (!t) continue;
+        if (hay.includes(t)) { matched++; continue; }
+        const stem = t.endsWith('s') ? t.slice(0, -1) : t;
+        if (stem.length >= 3 && hay.includes(stem)) matched++;
+    }
+    return matched;
 }
 
-function categoryHints(category) {
-    const c = (category || '').toLowerCase();
-    const hints = [];
-    if (c.includes('fruit')) { hints.push('fruit', 'fresh'); }
-    if (c.includes('veggie') || c.includes('vegetable')) { hints.push('vegetable', 'fresh'); }
-    if (c.includes('bakery')) { hints.push('bakery', 'bread', 'loaf'); }
-    if (c.includes('meat') || c.includes('poultry')) { hints.push('meat'); }
-    if (c.includes('seafood') || c.includes('fish')) { hints.push('seafood', 'fish'); }
-    if (c.includes('beverage') || c.includes('drink')) { hints.push('drink', 'beverage', 'bottle'); }
-    if (c.includes('snack')) { hints.push('snack'); }
-    return hints;
-}
-
-function buildQueryVariants(name, category, description) {
-    const baseName = (name || '').trim();
-    const words = baseName.split(/\s+/);
-    const simpleNoun = words.length === 1 ? baseName : '';
-    const plural = simpleNoun ? pluralizeSimple(simpleNoun) : '';
-    const hints = categoryHints(category);
-    const variants = [];
-    const suffix = 'isolated on white background product';
-    if (baseName && category) variants.push([baseName, category, suffix].filter(Boolean).join(' '));
-    if (baseName) variants.push([baseName, ...hints, suffix].filter(Boolean).join(' '));
-    if (plural) variants.push([plural, ...hints, suffix].filter(Boolean).join(' '));
-    if (baseName) variants.push([baseName, 'whole', 'single', suffix].join(' '));
-    if (baseName) variants.push([baseName, 'fresh', suffix].join(' '));
-    if (baseName) variants.push([baseName, suffix].join(' '));
-    // De-dup and return
-    const seen = new Set();
-    const uniq = [];
-    for (const v of variants) { if (!seen.has(v)) { seen.add(v); uniq.push(v); } }
-    return uniq;
+function buildQueryVariants(name) {
+    const cleaned = cleanProductName(name);
+    return cleaned ? [cleaned] : [];
 }
 
 async function searchPixabayImage(query, { tokens = [], negative = [] } = {}) {
@@ -392,25 +358,21 @@ async function searchWikipediaImage(query) {
     } catch (_) { return null; }
 }
 
-async function searchGroceryImage(name, category, description) {
-    // Build tokens and negatives; keep 'rice' out unless it is part of tokens
-    const tokens = buildTokens(name, category, description);
-    const negatives = [];
-    if (!tokens.includes('rice')) negatives.push('rice');
-    // Craft a white background focused query
-    const queryBase = [name, category, 'isolated on white background', 'product', 'grocery'].filter(Boolean).join(' ');
-    // Try Pixabay first (best licensing for this use case)
-    let url = await searchPixabayImage(queryBase, { tokens, negative: negatives });
-    if (url) return url;
-    // Then Unsplash (requires access key)
-    url = await searchUnsplashImage(queryBase);
-    if (url) return url;
-    // Fall back to Wikipedia if nothing else
-    return await searchWikipediaImage([name, category].filter(Boolean).join(' '));
+async function searchGroceryImage(name) {
+    const tokens = buildNameTokens(name);
+    const variants = buildQueryVariants(name);
+    for (const v of variants) {
+        const urls = await searchPixabayImages(v, { tokens, useWhiteFilter: false, includeCategory: false }, 1);
+        if (urls.length) return urls[0];
+    }
+    const query = cleanProductName(name) || name;
+    const unsplash = await searchUnsplashImage(query);
+    if (unsplash) return unsplash;
+    return await searchWikipediaImage(query);
 }
 
-// Render an image blob into a 760x600 white background canvas (contain fit) and export as JPEG
-async function renderToFixedCanvasJpeg(blob, targetW = 760, targetH = 600, quality = 0.9) {
+// Fit imported images without stretching, preserving alpha in a 760x600 PNG.
+async function renderToFixedCanvasPng(blob, targetW = 760, targetH = 600) {
     // Create bitmap or HTMLImageElement
     let bitmap = null;
     try {
@@ -432,16 +394,13 @@ async function renderToFixedCanvasJpeg(blob, targetW = 760, targetH = 600, quali
             const canvas = document.createElement('canvas');
             canvas.width = targetW; canvas.height = targetH;
             const ctx = canvas.getContext('2d');
-            // Fill white background
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, targetW, targetH);
             const iw = img.naturalWidth || img.width; const ih = img.naturalHeight || img.height;
             const scale = Math.min(targetW / iw, targetH / ih);
             const dw = Math.floor(iw * scale); const dh = Math.floor(ih * scale);
             const dx = Math.floor((targetW - dw) / 2); const dy = Math.floor((targetH - dh) / 2);
             ctx.imageSmoothingQuality = 'high';
             ctx.drawImage(img, dx, dy, dw, dh);
-            const out = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+            const out = await new Promise(res => canvas.toBlob(res, 'image/png'));
             return out;
         } finally {
             URL.revokeObjectURL(url);
@@ -451,15 +410,13 @@ async function renderToFixedCanvasJpeg(blob, targetW = 760, targetH = 600, quali
         const canvas = document.createElement('canvas');
         canvas.width = targetW; canvas.height = targetH;
         const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, targetW, targetH);
         const iw = bitmap.width; const ih = bitmap.height;
         const scale = Math.min(targetW / iw, targetH / ih);
         const dw = Math.floor(iw * scale); const dh = Math.floor(ih * scale);
         const dx = Math.floor((targetW - dw) / 2); const dy = Math.floor((targetH - dh) / 2);
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(bitmap, dx, dy, dw, dh);
-        const out = await new Promise(res => canvas.toBlob(res, 'image/jpeg', quality));
+        const out = await new Promise(res => canvas.toBlob(res, 'image/png'));
         try { bitmap.close && bitmap.close(); } catch (_) { }
         return out;
     }
@@ -470,13 +427,13 @@ async function fetchAndUploadImage(imageUrl, product, attemptName) {
         const resp = await fetch(imageUrl, { mode: 'cors' });
         if (!resp.ok) throw new Error(`image fetch ${resp.status}`);
         const originalBlob = await resp.blob();
-        // Normalize to 760x600 JPEG on white background
-        const processed = await renderToFixedCanvasJpeg(originalBlob, 760, 600, 0.9);
+        // Normalize to 760x600 PNG preserving transparency
+        const processed = await renderToFixedCanvasPng(originalBlob, 760, 600);
         if (!processed) throw new Error('failed to process image');
-        const contentType = 'image/jpeg';
+        const contentType = 'image/png';
         // File naming
         const safeBase = (attemptName || product.name || 'image').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'image';
-        const fileName = `${safeBase}-${Date.now()}.jpg`;
+        const fileName = `${safeBase}-${Date.now()}.png`;
         const { uploadUrl, key } = await dbService.getUploadUrl({ fileName, contentType, productId: product.id });
         const putResp = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': contentType }, body: processed });
         if (!putResp.ok) {
@@ -677,17 +634,17 @@ function parseBarcodeLookupResult(apiProduct) {
 // Download an image URL as a File object for the image picker
 // Tries direct fetch first, then falls back to Lambda image proxy to bypass CORS
 async function downloadImageAsFile(imageUrl, fileName) {
-    const safeName = (fileName || 'barcode-image').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) + '.jpg';
+    const safeName = (fileName || 'barcode-image').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 50) + '.png';
 
     // Strategy 1: Direct fetch with CORS (fast path — works if CDN allows it)
     try {
         const resp = await fetch(imageUrl, { mode: 'cors' });
         if (!resp.ok) throw new Error(`Fetch failed: ${resp.status}`);
         const blob = await resp.blob();
-        const processed = await renderToFixedCanvasJpeg(blob, 760, 600, 0.9);
+        const processed = await renderToFixedCanvasPng(blob, 760, 600);
         if (!processed) throw new Error('Image processing failed');
         console.log('downloadImageAsFile: direct fetch succeeded');
-        return new File([processed], safeName, { type: 'image/jpeg' });
+        return new File([processed], safeName, { type: 'image/png' });
     } catch (e) {
         console.warn('downloadImageAsFile: direct fetch failed, trying Lambda proxy:', e.message);
     }
@@ -717,12 +674,12 @@ async function downloadImageAsFile(imageUrl, fileName) {
         const dataResp = await fetch(data.dataUrl);
         const blob = await dataResp.blob();
 
-        // Process to standardized 760x600 JPEG
-        const processed = await renderToFixedCanvasJpeg(blob, 760, 600, 0.9);
+        // Process to standardized 760x600 PNG
+        const processed = await renderToFixedCanvasPng(blob, 760, 600);
         if (!processed) throw new Error('Image processing after proxy failed');
 
         console.log('downloadImageAsFile: Lambda proxy succeeded');
-        return new File([processed], safeName, { type: 'image/jpeg' });
+        return new File([processed], safeName, { type: 'image/png' });
     } catch (e2) {
         console.warn('downloadImageAsFile: Lambda proxy failed:', e2.message);
     }
@@ -738,8 +695,6 @@ async function downloadImageAsFile(imageUrl, fileName) {
                     canvas.width = 760;
                     canvas.height = 600;
                     const ctx = canvas.getContext('2d');
-                    ctx.fillStyle = '#ffffff';
-                    ctx.fillRect(0, 0, 760, 600);
                     const iw = img.naturalWidth || img.width;
                     const ih = img.naturalHeight || img.height;
                     const scale = Math.min(760 / iw, 600 / ih);
@@ -749,7 +704,7 @@ async function downloadImageAsFile(imageUrl, fileName) {
                     const dy = Math.floor((600 - dh) / 2);
                     ctx.imageSmoothingQuality = 'high';
                     ctx.drawImage(img, dx, dy, dw, dh);
-                    canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/jpeg', 0.9);
+                    canvas.toBlob(b => b ? resolve(b) : reject(new Error('toBlob null')), 'image/png');
                 } catch (err) {
                     reject(err);
                 }
@@ -759,7 +714,7 @@ async function downloadImageAsFile(imageUrl, fileName) {
         });
         if (blob) {
             console.log('downloadImageAsFile: img+canvas fallback succeeded');
-            return new File([blob], safeName, { type: 'image/jpeg' });
+            return new File([blob], safeName, { type: 'image/png' });
         }
     } catch (e3) {
         console.warn('downloadImageAsFile: all strategies failed:', e3.message);
@@ -1066,7 +1021,7 @@ let filters = {
     'out-of-stock': true
 };
 // In-memory cache for signed GET URLs
-const imageUrlCache = new Map(); // key -> url
+const imageUrlCache = new Map(); // key -> { url, expiresAt }
 
 // Initialize the application
 document.addEventListener('DOMContentLoaded', function () {
@@ -1091,6 +1046,7 @@ document.addEventListener('DOMContentLoaded', function () {
 // Tab switching
 // =====================
 function switchTab(name) {
+    document.body.classList.toggle('ai-workspace-active', name === 'ai');
     const panelName = (name === 'audit') ? 'products' : name;
     document.querySelectorAll('.tab-panel').forEach(p => { p.style.display = 'none'; });
     const panel = document.getElementById('panel-' + panelName);
@@ -1111,6 +1067,8 @@ function switchTab(name) {
         btn.classList.add('active');
         btn.setAttribute('aria-current', 'page');
     });
+    if (name === 'ai' && window.aiWorkspace) window.aiWorkspace.refresh();
+    if (name === 'label-print') renderLabelPrintList('');
 }
 
 // =====================
@@ -1281,12 +1239,14 @@ class DynamoDBService {
             upc: product.upc || product.barcode || '',
             internalBarcode: product.internalBarcode || product.barcode || '',
             quantity: typeof product.quantity === 'number' ? product.quantity : (parseFloat(product.quantity) || 0),
-            lowStockThreshold: typeof product.lowStockThreshold === 'number' ? product.lowStockThreshold : (parseFloat(product.lowStockThreshold) || 5),
+            lowStockThreshold: typeof product.lowStockThreshold === 'number' ? product.lowStockThreshold : (Number.isFinite(parseFloat(product.lowStockThreshold)) ? parseFloat(product.lowStockThreshold) : 5),
             availability: product.availability,
             areaLocation: product.areaLocation || 'A1',
             scaleNeed: product.scaleNeed === true,
             imageKeys: Array.isArray(product.imageKeys) ? product.imageKeys : [],
             deleteKeys: Array.isArray(product.deleteKeys) ? product.deleteKeys : undefined,
+            ingredients: product.ingredients,
+            expectedUpdatedAt: product.updatedAt,
             allergySummary: product.allergySummary
         });
         const headers = { 'Content-Type': 'application/json' };
@@ -1321,7 +1281,12 @@ class DynamoDBService {
     }
 
     async getImageUrl(key) {
-        if (imageUrlCache.has(key)) return { url: imageUrlCache.get(key) };
+        const cached = imageUrlCache.get(key);
+        if (cached && cached.expiresAt > Date.now()) return { url: cached.url };
+        imageUrlCache.delete(key);
+        // The backend signs URLs for 60 seconds. Allow time for the request
+        // and image download instead of reusing expired URLs indefinitely.
+        const requestedAt = Date.now();
         const headers = { 'Content-Type': 'application/json' };
         const token = getIdToken();
         if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -1338,7 +1303,7 @@ class DynamoDBService {
             throw new Error(`Image URL failed (${resp.status}): ${t}`);
         }
         const json = await resp.json();
-        if (json && json.url) imageUrlCache.set(key, json.url);
+        if (json && json.url) imageUrlCache.set(key, { url: json.url, expiresAt: requestedAt + 45000 });
         return json;
     }
 
@@ -1376,6 +1341,7 @@ async function loadProducts() {
         } while (lastKey && safety < 100);
         products = all;
         renderProducts();
+        if (window.aiWorkspace) window.aiWorkspace.refresh();
     } catch (error) {
         showError('Failed to load products: ' + error.message);
     } finally {
@@ -1397,6 +1363,55 @@ function renderStockLevel(product) {
     return `<span class="stock-badge stock-ok">${display}</span>`;
 }
 
+// Fallbacks must match the saved image key exactly. Never show a shared
+// category photo as though it were the actual product.
+const VERIFIED_PRODUCT_IMAGES = Object.freeze({
+    "products/MUP0KGVN6PYEKSHFWQU16W/transparent-20261026-carrots-loose.png": "assets/product-images/carrots-loose.png",
+    "products/MUP0KE5B_RI5PRLFJTKMEG/transparent-20261025-ground-beef.png": "assets/product-images/ground-beef.png",
+    "products/MUP0KERJVGNQU_S2O3LA-W/transparent-20261025-orange-juice.png": "assets/product-images/orange-juice.png",
+    "products/MUP0KIAULGBI_NTXB9OGIW/transparent-20261025-granola-bars.png": "assets/product-images/granola-bars.png",
+    "products/MUP0KEHJ8HDWAYFTNVY37W/transparent-20261025-apples.png": "assets/product-images/apples.png",
+    "products/MODSQNQ45YVRQZGXH1G2SQ/transparent-20261025-arizona.png": "assets/product-images/arizona.png",
+    "products/MUP0KDIJI6AIUNXVXYH3SW/transparent-20261025-eggs.png": "assets/product-images/eggs.png",
+    "products/MUVS3T8UTVTS_VU97UW5ZQ/transparent-20261025-hershey.png": "assets/product-images/hershey.png",
+    "products/MUP0KF4VI19J2SSYCNQRBQ/transparent-20261025-cheddar-cheese.png": "assets/product-images/cheddar-cheese.png",
+    "products/MUP0KGVN6PYEKSHFWQU16W/transparent-20261025-carrots.png": "assets/product-images/carrots.png",
+    "products/MUP0KGHR9_H5QE_6GAT0QG/transparent-20261025-onions.png": "assets/product-images/onions.png",
+    "products/MUP0KFN7QLEWXWK8CAUITQ/transparent-20261025-pasta.png": "assets/product-images/pasta.png",
+    "products/MUP0KH3F7R8CARVGWAWFXG/transparent-20261025-peanut-butter.png": "assets/product-images/peanut-butter.png",
+    "products/MUP0KD8JIWV3WVFIQRT9VW/transparent-20261025-bread.png": "assets/product-images/bread.png",
+    "products/MUP0KJYRSMFCEJVQPO7UTQ/transparent-20261025-soda.png": "assets/product-images/soda.png",
+    "products/MUP0KFDRRVOBGNMWN5GXHQ/transparent-20261025-rice.png": "assets/product-images/rice.png",
+    "products/MUP0KFW3NVABKEDIK6JAHA/transparent-20261025-tomato-sauce.png": "assets/product-images/tomato-sauce.png",
+    "products/MUP0KHBRXTQB2UYZLPTAIW/transparent-20261025-jelly.png": "assets/product-images/jelly.png",
+    "products/MUP0KI1VCTCVOTU1CCHEFW/transparent-20261025-yogurt.png": "assets/product-images/yogurt.png",
+    "products/MUP0KJSN-IQGIQPO1HEJ9G/transparent-20261025-canola-oil.png": "assets/product-images/canola-oil.png",
+    "products/MUP0KIKR8MG9XBARHMWUSW/transparent-20261025-coffee.png": "assets/product-images/coffee.png",
+    "products/MUP0KITN4THKABFNG7I18W/transparent-20261025-tea.png": "assets/product-images/tea.png",
+    "products/MUP0KJBGHMCFQT6O-JKTYQ/transparent-20261025-flour.png": "assets/product-images/flour.png",
+    "products/MM1JS4NQ9PFVFKSI5MOPEG/transparent-20261025-pink-lady-apple.png": "assets/product-images/pink-lady-apple.png",
+    "products/MUP0KGNV-RGFJC0AD2FXKQ/transparent-20261025-lettuce.png": "assets/product-images/lettuce.png",
+    "products/MUP0KCZ3UJG5AXHUWU5GYG/transparent-20261025-bananas.png": "assets/product-images/bananas.png",
+    "products/MUP0KJKVHXWGA1211I7INQ/transparent-20261025-olive-oil.png": "assets/product-images/olive-oil.png",
+    "products/MUP0KG6NPXGXGO45JVA9CG/transparent-20261025-potatoes.png": "assets/product-images/potatoes.png",
+    "products/MUP0KCMXEMUAOER9D_UUWW/transparent-20261025-milk.png": "assets/product-images/milk.png",
+    "products/MUP0KJ3NSHTLVANXZ6SGXQ/transparent-20261025-sugar.png": "assets/product-images/sugar.png",
+    "products/MUP0KK6JUSH-G2-JCNCO9G/transparent-20261025-water.png": "assets/product-images/water.png",
+    "products/MUP0KDU8NIF-OOIYNQFKCW/transparent-20261025-chicken-breast.png": "assets/product-images/chicken-breast.png"
+});
+const NO_PRODUCT_IMAGE = 'data:image/svg+xml,' + encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="760" height="600" viewBox="0 0 760 600"><text x="380" y="310" text-anchor="middle" font-family="sans-serif" font-size="36" fill="#64748b">No image</text></svg>'
+);
+
+function getProductFallbackImage(product) {
+    const keys = product.imageKeys || product.image_keys || [];
+    return (Array.isArray(keys) && VERIFIED_PRODUCT_IMAGES[keys[0]]) || NO_PRODUCT_IMAGE;
+}
+
+function escapeProductText(value) {
+    return String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+}
+
 // Render products in the table
 function renderProducts() {
     const tbody = document.getElementById('products-tbody');
@@ -1410,41 +1425,61 @@ function renderProducts() {
     filteredProducts.forEach(product => {
         const row = document.createElement('tr');
         const thumbCellId = `thumb-${product.id}`;
+        const fallbackImage = getProductFallbackImage(product);
         const unit = (product.priceUnit || 'piece');
         const unitLabelMap = { piece: 'piece', lb: 'lb', oz: 'oz', g: 'g', kg: 'kg', gallon: 'gallon', dozen: 'dozen', loaf: 'loaf', bag: 'bag', bags: 'bags', carton: 'carton', block: 'block', jar: 'jar', cup: 'cup', box: 'box', pack: 'pack', can: 'can', bottle: 'bottle' };
         const unitLabel = unitLabelMap[unit] || unit;
         row.innerHTML = `
                     <td>
-                        <div class="product-image" id="${thumbCellId}">📷</div>
+                        <div class="product-image" id="${thumbCellId}">
+                            <img src="${fallbackImage}" alt="${escapeProductText(product.name || 'Product')}" loading="lazy">
+                        </div>
                     </td>
-                    <td><span class="product-name">${product.name}</span></td>
-                    <td>${product.description}</td>
-                    <td><span class="status-badge ${product.availability === 'In Stock' ? 'status-in-stock' : 'status-out-of-stock'}">${product.availability}</span></td>
-                    <td style="font-family:monospace">${product.internalBarcode || product.barcode || '—'}</td>
-                    <td style="color:#888;font-size:12px">${product.upc || '—'}</td>
-                    <td>${product.category}</td>
+                    <td><span class="product-name">${escapeProductText(product.name)}</span></td>
+                    <td>${escapeProductText(product.description)}</td>
+                    <td><span class="status-badge ${product.availability === 'In Stock' ? 'status-in-stock' : 'status-out-of-stock'}">${escapeProductText(product.availability)}</span></td>
+                    <td style="font-family:monospace">${escapeProductText(product.internalBarcode || product.barcode || '—')}</td>
+                    <td style="color:#888;font-size:12px">${escapeProductText(product.upc || '—')}</td>
+                    <td>${escapeProductText(product.category)}</td>
                     <td>${renderStockLevel(product)}</td>
-                    <td>${product.areaLocation || 'A1'}</td>
-                    <td><span class="price">$${product.price.toFixed(2)} / ${unitLabel}</span></td>
+                    <td>${escapeProductText(product.areaLocation || 'A1')}</td>
+                    <td><span class="price">$${product.price.toFixed(2)} / ${escapeProductText(unitLabel)}</span></td>
                     <td>
                         <button class="action-btn" onclick="editProduct('${product.id}')">Edit</button>
                         <button class="action-btn delete-btn" onclick="deleteProduct('${product.id}')">Delete</button>
                     </td>
                 `;
+        const allergyCell = document.createElement('td');
+        allergyCell.className = 'product-allergy-cell';
+        const summary = product.allergySummary && product.allergySummary.toLowerCase() !== 'none' ? product.allergySummary : '';
+        const labels = { not_required: '—', complete: 'No notice generated', needs_label: 'Automatic source lookup pending', retry: 'Retry scheduled', unavailable: 'No reliable source found', manual: 'Manually reviewed' };
+        allergyCell.textContent = summary || labels[product.allergyStatus] || 'Automatic check after 24h';
+        if (!summary && product.allergyAttempts >= 3 && ['needs_label', 'retry'].includes(product.allergyStatus)) allergyCell.textContent = 'No reliable source found';
+        if (product.allergySource === 'open_food_facts') {
+            const source = document.createElement('a');
+            source.textContent = 'Open Food Facts';
+            const code = String(product.upc || '');
+            if (/^\d{8,14}$/.test(code)) source.href = 'https://world.openfoodfacts.org/product/' + code;
+            source.target = '_blank'; source.rel = 'noopener noreferrer';
+            allergyCell.append(document.createElement('br'), source);
+        }
+        row.insertBefore(allergyCell, row.lastElementChild);
         tbody.appendChild(row);
 
         // Render thumbnail if available
         const keys = product.imageKeys || product.image_keys || [];
         const cell = document.getElementById(thumbCellId);
-        if (cell) cell.innerHTML = '📷';
         if (Array.isArray(keys) && keys.length > 0) {
             const firstKey = keys[0];
             const isDirectUrl = typeof firstKey === 'string' && /^https?:\/\//i.test(firstKey);
             const setImg = (src) => {
                 const c = document.getElementById(thumbCellId);
                 if (!c) return;
-                if (!src) { c.textContent = '📷'; return; }
-                c.innerHTML = `<img id="${thumbCellId}-img" src="${src}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;" onerror="window.refreshThumb && window.refreshThumb('${firstKey}','${thumbCellId}')"/>`;
+                if (!src) {
+                    c.innerHTML = `<img id="${thumbCellId}-img" src="${fallbackImage}" alt="${escapeProductText(product.name || 'Product')}" loading="lazy">`;
+                    return;
+                }
+                c.innerHTML = `<img id="${thumbCellId}-img" src="${src}" alt="${escapeProductText(product.name || 'Product')}" loading="lazy" onerror="window.refreshThumb && window.refreshThumb('${firstKey}','${thumbCellId}')"/>`;
             };
             if (isDirectUrl) {
                 setImg(firstKey);
@@ -1456,6 +1491,9 @@ function renderProducts() {
                     setImg(null);
                 });
             }
+        } else {
+            // Keep the catalog polished even when no uploaded image exists.
+            if (cell) cell.innerHTML = `<img id="${thumbCellId}-img" src="${fallbackImage}" alt="${escapeProductText(product.name || 'Product')}" loading="lazy">`;
         }
     });
 }
@@ -1468,25 +1506,36 @@ window.refreshThumb = async function (key, cellId) {
         if (!cell) return;
         // Prevent infinite loops: if we've already retried, bail out
         if (img && img.dataset && img.dataset.retried === '1') {
-            cell.textContent = '📷';
+            const product = products.find(item => `thumb-${item.id}` === cellId);
+            cell.innerHTML = `<img src="${getProductFallbackImage(product || {})}" alt="Product" loading="lazy">`;
             return;
         }
         // Fetch a fresh signed URL (bypass cache by temporarily clearing)
         try { imageUrlCache.delete && imageUrlCache.delete(key); } catch (_) { }
         const { url } = await dbService.getImageUrl(key);
-        if (!url) { cell.textContent = '📷'; return; }
-        // Append a cache buster
-        const finalUrl = url + (url.includes('?') ? '&' : '?') + 'r=' + Date.now();
+        if (!url) {
+            cell.innerHTML = `<img src="${getProductFallbackImage(products.find(item => `thumb-${item.id}` === cellId) || {})}" alt="Product" loading="lazy">`;
+            return;
+        }
+        // S3 signs the complete query string; adding a cache buster invalidates it.
+        const finalUrl = url;
         if (img) {
             img.dataset.retried = '1';
             img.src = finalUrl;
-            img.onerror = function () { this.onerror = null; this.parentElement.textContent = '📷'; };
+            img.onerror = function () {
+                this.onerror = null;
+                const product = products.find(item => `thumb-${item.id}` === cellId);
+                this.src = getProductFallbackImage(product || {});
+            };
         } else {
-            cell.innerHTML = `<img id="${cellId}-img" src="${finalUrl}" alt="thumb" style="width:40px;height:40px;object-fit:cover;border-radius:6px;" onerror="this.onerror=null;this.parentElement.textContent='📷';"/>`;
+            cell.innerHTML = `<img id="${cellId}-img" src="${finalUrl}" alt="Product" loading="lazy"/>`;
         }
     } catch (e) {
         const cell = document.getElementById(cellId);
-        if (cell) cell.textContent = '📷';
+        if (cell) {
+            const product = products.find(item => `thumb-${item.id}` === cellId);
+            cell.innerHTML = `<img src="${getProductFallbackImage(product || {})}" alt="Product" loading="lazy">`;
+        }
     }
 }
 
@@ -1577,6 +1626,8 @@ function openAddProductModal() {
     attachSuggestionAutoRefresh();
     const allergyEl = document.getElementById('product-allergy-summary');
     if (allergyEl) allergyEl.value = '';
+    const ingredientsEl = document.getElementById('product-ingredients');
+    if (ingredientsEl) ingredientsEl.value = '';
 }
 
 // Edit product
@@ -1608,6 +1659,8 @@ function editProduct(id) {
         if (scaleEl) scaleEl.checked = product.scaleNeed === true;
         const allergyEl = document.getElementById('product-allergy-summary');
         if (allergyEl) allergyEl.value = product.allergySummary || '';
+        const ingredientsEl = document.getElementById('product-ingredients');
+        if (ingredientsEl) ingredientsEl.value = product.ingredients || '';
         document.getElementById('product-modal').style.display = 'block';
         resetImages();
         clearSuggestedImages();
@@ -1624,15 +1677,10 @@ function editProduct(id) {
                 updateCarouselUI();
             }).catch(() => {/* ignore */ });
         });
-        // Auto-trigger suggestions for this product using its current name/category
-        // Delay slightly to ensure DOM is fully updated
+        // Auto-trigger suggestions from the product name
         setTimeout(() => {
-            // Only trigger if a name or category exist
             const hasName = (document.getElementById('product-name')?.value || '').trim().length > 0;
-            const hasCat = (document.getElementById('product-category')?.value || '').trim().length > 0;
-            if (hasName || hasCat) {
-                suggestImagesForCurrentProduct();
-            }
+            if (hasName) suggestImagesForCurrentProduct();
         }, 50);
     }
 }
@@ -1649,15 +1697,17 @@ async function saveProduct() {
             upc: (document.getElementById('product-upc')?.value || '').trim(),
             internalBarcode: (document.getElementById('product-internal-barcode')?.value || '').trim(),
             quantity: parseFloat(document.getElementById('product-quantity')?.value) || 0,
-            lowStockThreshold: parseFloat(document.getElementById('product-low-stock-threshold')?.value) || 5,
+            lowStockThreshold: Number.isFinite(parseFloat(document.getElementById('product-low-stock-threshold')?.value)) ? parseFloat(document.getElementById('product-low-stock-threshold').value) : 5,
             availability: document.getElementById('product-availability').value,
             areaLocation: (document.getElementById('product-area') && document.getElementById('product-area').value) || 'A1',
             scaleNeed: (document.getElementById('product-scale-need') && document.getElementById('product-scale-need').checked) === true,
+            ingredients: document.getElementById('product-ingredients')?.value,
             allergySummary: document.getElementById('product-allergy-summary') ? document.getElementById('product-allergy-summary').value : ''
         };
 
         if (currentEditingId) {
             formData.id = currentEditingId;
+            formData.updatedAt = products.find(p => p.id === currentEditingId)?.updatedAt;
         }
 
         // Upload new images to S3 per slot and track uploadedKey on selectedImages entries
@@ -2256,136 +2306,307 @@ window.onCsvSelected = onCsvSelected;
 // AI Allergies
 // =====================
 
-function getOpenAIKey() {
-    return window.localStorage.getItem('openai_api_key') || '';
-}
-
-function setOpenAIKey(key) {
-    if (key) window.localStorage.setItem('openai_api_key', key.trim());
-}
-
-async function ensureOpenAIKeyOrPrompt() {
-    let key = getOpenAIKey();
-    if (!key) {
-        key = window.prompt('Enter your OpenAI API key (for GPT-4o-mini) to detect allergies:', '');
-        if (key && key.trim()) {
-            setOpenAIKey(key.trim());
-        }
-    }
-    return getOpenAIKey();
-}
-
-async function checkAllergiesForProduct(product, apiKey) {
-    try {
-        const prompt = `
-Product Name: ${product.name}
-Description: ${product.description}
-Category: ${product.category}
-Price: ${product.price} ${product.priceUnit}
-Availability: ${product.availability}
-
-Analyze the above product information and identify any accurate possible allergies that the item may include or cause interactions.
-If you find NO significant possible action/reaction related to the item, output exactly "none".
-If you find potential allergies, provide a short text summary.
-Output format: Just the summary text or "none". Keep it concise.
-        `.trim();
-
-        const resp = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
-            },
-            body: JSON.stringify({
-                model: 'gpt-4o-mini',
-                messages: [
-                    { role: 'system', content: 'You are a helpful assistant that identifies allergens in grocery products.' },
-                    { role: 'user', content: prompt }
-                ],
-                max_tokens: 150
-            })
-        });
-
-        if (!resp.ok) {
-            const t = await resp.text();
-            console.warn('OpenAI error:', t);
-            return null;
-        }
-
-        const data = await resp.json();
-        const content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
-        if (!content) return null;
-
-        const clean = content.trim().replace(/^"|"$/g, '');
-        if (clean.toLowerCase() === 'none') return 'none';
-        return clean;
-    } catch (e) {
-        console.warn('checkAllergiesForProduct failed', e);
-        return null;
-    }
-}
-
-async function autoAssignAllergiesForAll() {
-    try {
-        const apiKey = await ensureOpenAIKeyOrPrompt();
-        if (!apiKey) {
-            showError('OpenAI API Key required.');
-            return;
-        }
-
-        showLoading(true);
-        let updated = 0;
-        let skipped = 0;
-
-        // Refresh products
-        if (!products || !products.length) {
-            await loadProducts();
-        }
-
-        for (const p of products) {
-            // Skip if already has allergy info that isn't empty/none?
-            // If it is 'none', we might want to re-check if we are running this explicitly?
-            // Let's assume we skip only if we have a real summary.
-            // Actually, if user clicks the button, maybe they want to fill in gaps.
-            if (p.allergySummary && p.allergySummary !== 'none' && p.allergySummary.length > 5) {
-                skipped++;
-                continue;
-            }
-
-            const summary = await checkAllergiesForProduct(p, apiKey);
-            if (!summary) {
-                skipped++;
-                continue;
-            }
-
-            // Save if different
-            if (summary !== p.allergySummary) {
-                try {
-                    await dbService.putProduct({
-                        ...p,
-                        allergySummary: summary,
-                        // Ensure existing images/fields are preserved
-                        imageKeys: p.imageKeys || [],
-                        deleteKeys: [] // explicit empty to avoid issues
-                    });
-                    updated++;
-                } catch (err) {
-                    console.warn('putProduct failed saving allergies', err);
-                }
-            } else {
-                skipped++;
-            }
-        }
-
-        await loadProducts();
-        showSuccess(`Allergy detection complete. Updated: ${updated}, Skipped/Unchanged: ${skipped}`);
-
-    } catch (err) {
-        showError('Auto detect allergies failed: ' + err.message);
-    } finally {
-        showLoading(false);
-    }
-}
-
-// Expose
+// AI reviews are prepared in the workspace and saved only after review.
+function autoAssignAllergiesForAll() { switchTab('ai'); }
 window.autoAssignAllergiesForAll = autoAssignAllergiesForAll;
+
+// =====================
+// Label Print tab
+// =====================
+let labelPrintSelected = new Set();
+let labelPreviewProductId = null;
+
+function renderLabelPrintList(filterTerm) {
+    const term = (filterTerm || '').trim().toLowerCase();
+    const tbody = document.getElementById('label-print-tbody');
+    if (!tbody) return;
+    const filtered = products.filter(p => {
+        if (!term) return true;
+        const name = (p.name || '').toLowerCase();
+        const barcode = (p.internalBarcode || p.barcode || '').toLowerCase();
+        return name.includes(term) || barcode.includes(term);
+    });
+    tbody.innerHTML = '';
+    filtered.forEach(p => {
+        const barcode = p.internalBarcode || p.barcode || '—';
+        const hasBarcode = !!(p.internalBarcode || p.barcode);
+        const checked = labelPrintSelected.has(p.id) ? 'checked' : '';
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td style="text-align:center"><input type="checkbox" class="label-row-check" data-id="${p.id}" ${checked} onchange="onLabelRowCheck('${p.id}',this.checked)"></td>
+            <td><span class="product-name">${p.name}</span></td>
+            <td style="font-family:monospace;font-size:13px">${hasBarcode ? barcode : '<span style="color:#d97706">No barcode</span>'}</td>
+            <td>$${p.price.toFixed(2)} / ${p.priceUnit || 'piece'}</td>
+            <td>${p.category || '—'}</td>
+            <td>${p.areaLocation || 'A1'}</td>
+            <td>
+                <button class="action-btn" onclick="openLabelPreview('${p.id}')" ${hasBarcode ? '' : 'disabled title="No internal barcode"'}>👁 Preview ZPL</button>
+                <button class="action-btn" style="color:#1677ff;border-color:#91caff" onclick="downloadProductZpl('${p.id}')" ${hasBarcode ? '' : 'disabled title="No internal barcode"'}>⬇ ZPL</button>
+            </td>`;
+        tbody.appendChild(row);
+    });
+    updateLabelSelectedCount();
+    updateLabelCheckAll();
+}
+
+function onLabelRowCheck(productId, checked) {
+    if (checked) labelPrintSelected.add(productId);
+    else labelPrintSelected.delete(productId);
+    updateLabelSelectedCount();
+    updateLabelCheckAll();
+}
+
+function toggleLabelPrintAll(checked) {
+    const checkboxes = document.querySelectorAll('.label-row-check');
+    if (checked) {
+        checkboxes.forEach(cb => { cb.checked = true; labelPrintSelected.add(cb.dataset.id); });
+    } else {
+        checkboxes.forEach(cb => { cb.checked = false; });
+        labelPrintSelected.clear();
+    }
+    const allCheck = document.getElementById('label-check-all');
+    if (allCheck) { allCheck.checked = checked; allCheck.indeterminate = false; }
+    updateLabelSelectedCount();
+}
+
+function updateLabelCheckAll() {
+    const checkboxes = Array.from(document.querySelectorAll('.label-row-check'));
+    const allCheck = document.getElementById('label-check-all');
+    if (!allCheck || !checkboxes.length) return;
+    const allChecked = checkboxes.every(cb => cb.checked);
+    const someChecked = checkboxes.some(cb => cb.checked);
+    allCheck.checked = allChecked;
+    allCheck.indeterminate = !allChecked && someChecked;
+}
+
+function updateLabelSelectedCount() {
+    const el = document.getElementById('label-selected-count');
+    if (el) el.textContent = `${labelPrintSelected.size} product${labelPrintSelected.size === 1 ? '' : 's'} selected`;
+}
+
+// ZPL helpers
+function sanitizeZplText(str) {
+    return (str || '').replace(/[\^~]/g, '').replace(/[\x00-\x1F]/g, ' ').trim();
+}
+
+function calcCode128X(barcodeStr, moduleWidth, labelWidthDots) {
+    // Use full string length (Code 128B width) — matches what Labelary/ZPL actually renders
+    // start(11) + data chars(11 each) + check(11) + stop(13) = 35 + 11*n modules
+    const totalModules = 35 + 11 * barcodeStr.length;
+    const barcodeWidth = totalModules * moduleWidth;
+    return Math.max(10, Math.floor((labelWidthDots - barcodeWidth) / 2));
+}
+
+function getLabelSize() {
+    return document.getElementById('label-size-select')?.value || '4x2';
+}
+
+function getLabelCopies() {
+    return Math.max(1, Math.min(99, parseInt(document.getElementById('label-copies-input')?.value) || 1));
+}
+
+function generateZpl(product, copies, labelSize) {
+    const name = sanitizeZplText(product.name || 'Unknown');
+    const rawBarcode = (product.internalBarcode || product.barcode || '').replace(/[^\x20-\x7E]/g, '').trim();
+    if (!rawBarcode) return null;
+    const price = sanitizeZplText(`$${(product.price || 0).toFixed(2)} / ${product.priceUnit || 'piece'}`);
+
+    let singleLabel;
+    if (labelSize === '2x1') {
+        // 2" x 1" = 406 x 203 dots @ 203 dpi
+        const bx = calcCode128X(rawBarcode, 2, 406);
+        singleLabel = [
+            '^XA',
+            '^CI28',
+            `^FO0,8^A0N,22,15^FB406,1,0,C^FD${name}^FS`,
+            `^FO${bx},38^BY2,3,68^BCN,68,Y,N,N^FD${rawBarcode}^FS`,
+            `^FO0,173^A0N,22,15^FB396,1,0,R^FD${price}^FS`,
+            '^XZ'
+        ].join('\n');
+    } else if (labelSize === '4x3') {
+        // 4" x 3" = 812 x 609 dots @ 203 dpi
+        const bx = calcCode128X(rawBarcode, 4, 812);
+        singleLabel = [
+            '^XA',
+            '^CI28',
+            `^FO0,20^A0N,46,32^FB812,2,0,C^FD${name}^FS`,
+            `^FO${bx},120^BY4,3,160^BCN,160,Y,N,N^FD${rawBarcode}^FS`,
+            `^FO0,368^A0N,38,26^FB787,1,0,R^FD${price}^FS`,
+            '^XZ'
+        ].join('\n');
+    } else if (labelSize === '4x6') {
+        // 4" x 6" = 812 x 1218 dots @ 203 dpi
+        const bx = calcCode128X(rawBarcode, 5, 812);
+        singleLabel = [
+            '^XA',
+            '^CI28',
+            `^FO0,30^A0N,54,38^FB812,2,0,C^FD${name}^FS`,
+            `^FO${bx},150^BY5,3,200^BCN,200,Y,N,N^FD${rawBarcode}^FS`,
+            `^FO0,445^A0N,44,32^FB787,1,0,R^FD${price}^FS`,
+            '^XZ'
+        ].join('\n');
+    } else {
+        // Default: 4" x 2" = 812 x 406 dots @ 203 dpi
+        const bx = calcCode128X(rawBarcode, 4, 812);
+        singleLabel = [
+            '^XA',
+            '^CI28',
+            `^FO0,15^A0N,40,28^FB812,2,0,C^FD${name}^FS`,
+            `^FO${bx},98^BY4,3,130^BCN,130,Y,N,N^FD${rawBarcode}^FS`,
+            `^FO0,305^A0N,34,24^FB787,1,0,R^FD${price}^FS`,
+            '^XZ'
+        ].join('\n');
+    }
+
+    const n = Math.max(1, Math.min(99, parseInt(copies) || 1));
+    return Array(n).fill(singleLabel).join('\n');
+}
+
+function downloadZplFile(content, filename) {
+    const blob = new Blob([content], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function downloadProductZpl(productId) {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    const zpl = generateZpl(product, getLabelCopies(), getLabelSize());
+    if (!zpl) { showError('This product has no internal barcode — cannot generate ZPL.'); return; }
+    const safeName = (product.name || 'product').replace(/[^a-z0-9]+/gi, '-').toLowerCase().slice(0, 40);
+    downloadZplFile(zpl, `label-${safeName}.zpl`);
+}
+
+function downloadSelectedZpl() {
+    if (!labelPrintSelected.size) { showError('No products selected. Select at least one product first.'); return; }
+    const size = getLabelSize();
+    const copies = getLabelCopies();
+    const parts = [];
+    let skipped = 0;
+    for (const id of labelPrintSelected) {
+        const product = products.find(p => p.id === id);
+        if (!product) continue;
+        const zpl = generateZpl(product, copies, size);
+        if (!zpl) { skipped++; continue; }
+        parts.push(zpl);
+    }
+    if (!parts.length) { showError('None of the selected products have an internal barcode.'); return; }
+    downloadZplFile(parts.join('\n'), `labels-${labelPrintSelected.size}-products.zpl`);
+    if (skipped > 0) showError(`${skipped} product(s) skipped — no internal barcode.`);
+    else showSuccess(`Downloaded ZPL for ${parts.length} product label${parts.length === 1 ? '' : 's'}.`);
+}
+
+// Label preview modal
+function openLabelPreview(productId) {
+    const product = products.find(p => p.id === productId);
+    if (!product) return;
+    labelPreviewProductId = productId;
+    const overlay = document.getElementById('label-preview-overlay');
+    if (!overlay) return;
+    overlay.classList.add('open');
+    const info = document.getElementById('label-preview-product-info');
+    if (info) info.innerHTML = `<strong>${product.name}</strong>&nbsp;&nbsp;·&nbsp;&nbsp;Barcode: <code style="font-size:13px;background:#f1f5f9;padding:2px 6px;border-radius:4px">${product.internalBarcode || product.barcode || '—'}</code>`;
+    const zpl = generateZpl(product, getLabelCopies(), getLabelSize());
+    const textarea = document.getElementById('label-zpl-text');
+    if (textarea) textarea.value = zpl || '(No internal barcode — cannot generate ZPL)';
+    showLabelPreviewTab('text');
+}
+
+function closeLabelPreview() {
+    const overlay = document.getElementById('label-preview-overlay');
+    if (overlay) overlay.classList.remove('open');
+    labelPreviewProductId = null;
+    const img = document.getElementById('label-visual-img');
+    if (img) { img.src = ''; img.style.display = 'none'; }
+    const err = document.getElementById('label-visual-error');
+    if (err) err.style.display = 'none';
+}
+
+function showLabelPreviewTab(tab) {
+    const textSection = document.getElementById('label-preview-text-section');
+    const visualSection = document.getElementById('label-preview-visual-section');
+    const textTab = document.getElementById('tab-zpl-text');
+    const visualTab = document.getElementById('tab-zpl-visual');
+    if (tab === 'visual') {
+        if (textSection) textSection.style.display = 'none';
+        if (visualSection) visualSection.style.display = '';
+        if (textTab) textTab.classList.remove('active');
+        if (visualTab) visualTab.classList.add('active');
+        renderLabelaryPreview();
+    } else {
+        if (textSection) textSection.style.display = '';
+        if (visualSection) visualSection.style.display = 'none';
+        if (textTab) textTab.classList.add('active');
+        if (visualTab) visualTab.classList.remove('active');
+    }
+}
+
+async function renderLabelaryPreview() {
+    const loadingEl = document.getElementById('label-visual-loading');
+    const imgEl = document.getElementById('label-visual-img');
+    const errEl = document.getElementById('label-visual-error');
+    if (!labelPreviewProductId) return;
+    const product = products.find(p => p.id === labelPreviewProductId);
+    if (!product) return;
+    const zpl = generateZpl(product, 1, getLabelSize());
+    if (!zpl) {
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (errEl) { errEl.textContent = 'No barcode — cannot render label.'; errEl.style.display = ''; }
+        return;
+    }
+    const sizeMap = { '2x1': '2x1', '4x2': '4x2', '4x3': '4x3', '4x6': '4x6' };
+    const dims = sizeMap[getLabelSize()] || '4x2';
+    if (loadingEl) loadingEl.style.display = '';
+    if (imgEl) imgEl.style.display = 'none';
+    if (errEl) errEl.style.display = 'none';
+    try {
+        const resp = await fetch(`https://api.labelary.com/v1/printers/8dpmm/labels/${dims}/0/`, {
+            method: 'POST',
+            headers: { 'Accept': 'image/png', 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: zpl
+        });
+        if (!resp.ok) throw new Error(`Labelary ${resp.status}`);
+        const blob = await resp.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        if (imgEl) { imgEl.src = blobUrl; imgEl.style.display = 'block'; }
+        if (loadingEl) loadingEl.style.display = 'none';
+    } catch (e) {
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (errEl) { errEl.textContent = 'Visual preview unavailable: ' + (e.message || e); errEl.style.display = ''; }
+    }
+}
+
+function copyLabelZpl() {
+    const textarea = document.getElementById('label-zpl-text');
+    if (!textarea) return;
+    navigator.clipboard.writeText(textarea.value).then(() => {
+        showSuccess('ZPL code copied to clipboard!');
+    }).catch(() => {
+        textarea.select();
+        document.execCommand('copy');
+        showSuccess('ZPL code copied to clipboard!');
+    });
+}
+
+function downloadCurrentLabelZpl() {
+    if (!labelPreviewProductId) return;
+    downloadProductZpl(labelPreviewProductId);
+}
+
+// Wire up window globals for HTML onclick handlers
+window.renderLabelPrintList = renderLabelPrintList;
+window.toggleLabelPrintAll = toggleLabelPrintAll;
+window.onLabelRowCheck = onLabelRowCheck;
+window.openLabelPreview = openLabelPreview;
+window.closeLabelPreview = closeLabelPreview;
+window.showLabelPreviewTab = showLabelPreviewTab;
+window.downloadProductZpl = downloadProductZpl;
+window.downloadSelectedZpl = downloadSelectedZpl;
+window.copyLabelZpl = copyLabelZpl;
+window.downloadCurrentLabelZpl = downloadCurrentLabelZpl;

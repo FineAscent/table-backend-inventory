@@ -1,0 +1,20 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #f3f6f0; color: #193a35; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+main { max-width: 600px; margin: 55px auto; padding: 0 20px; }
+.back { display: inline-block; margin-bottom: 24px; font-size: 13px; color: #416d50; text-decoration: none; }
+.key-card { background: #fff; border: 1px solid #dce5db; padding: 32px; border-radius: 16px; }
+.eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 1.6px; color: #52765d; }
+h1 { font-size: 28px; letter-spacing: -.6px; margin: 13px 0; }
+.intro, .help, .privacy { color: #62726a; line-height: 1.7; font-size: 13px; }
+dl { display: flex; gap: 40px; padding: 18px; background: #f5f8f2; border-radius: 9px; margin: 23px 0; }
+dt { color: #68786d; font-size: 11px; margin-bottom: 5px; } dd { margin: 0; font-size: 13px; font-weight: 600; }
+label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 9px; }
+input { width: 100%; padding: 13px; border: 1px solid #c6d6c9; border-radius: 8px; background: #fbfcfa; font: inherit; }
+button { border-radius: 8px; border: 1px solid #285c43; padding: 12px 16px; font-weight: 600; background: #285c43; color: #fff; cursor: pointer; margin: 5px 6px 0 0; }
+#key-clear { color: #41654d; background: #fff; border-color: #c6d6c9; }
+button:disabled, input:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: 3px solid #90b79b; outline-offset: 3px; }
+#key-status { font-size: 13px; line-height: 1.7; color: #386c4a; margin: 18px 0; }
+#key-status.error { color: #ad4535; }
+.privacy { border-top: 1px solid #e0e8dd; padding-top: 18px; font-size: 11px; }
+@media(max-width: 500px) { main { margin: 25px auto; } .key-card { padding: 23px; } h1 { font-size: 25px; } }

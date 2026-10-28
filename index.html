@@ -5,7 +5,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AliBaba Admin Dashboard</title>
-    <link rel="stylesheet" href="styles.css?v=20250831">
+    <link rel="preconnect" href="https://images.unsplash.com">
+    <link rel="stylesheet" href="styles.css?v=20261027-aws-key-settings">
+    <!-- Import map MUST appear before any type="module" script -->
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+    </script>
 </head>
 
 <body>
@@ -34,7 +44,8 @@
                     <button class="tab-item" data-tab="audit" onclick="switchTab('audit')">Audit Logs</button>
                     <button class="tab-item" data-tab="receive" onclick="switchTab('receive')">Inventory Add</button>
                     <button class="tab-item" data-tab="revenue" onclick="switchTab('revenue')">Revenue</button>
-                    <button class="tab-item" data-tab="rewards" onclick="switchTab('rewards')">Rewards</button>
+                    <button class="tab-item" data-tab="awards" onclick="switchTab('awards')">Awards</button>
+                    <button class="tab-item" data-tab="label-print" onclick="switchTab('label-print')">🏷️ Label Print</button>
                 </div>
             </div>
         </div>
@@ -54,7 +65,7 @@
                         <button class="add-product-btn delete-btn" onclick="removeAllImages()"
                             title="Remove all images from all products">Remove All Images</button>
                         <button class="add-product-btn" onclick="autoAssignAllergiesForAll()"
-                            title="Detect allergies using AI">Auto Detect Allergies</button>
+                            title="Monitor automatic allergy checks">AI Status</button>
                         <button class="add-product-btn barcode-scan-btn" onclick="openBarcodeLookupModal()">📦 Add by
                             Barcode</button>
                         <button class="add-product-btn" onclick="openAddProductModal()">Add Product</button>
@@ -89,6 +100,7 @@
                             <th>Qty</th>
                             <th>Area</th>
                             <th>Price</th>
+                            <th>Allergy notice</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
@@ -245,11 +257,102 @@
                 </div>
             </div>
 
-            <!-- Rewards placeholder -->
-            <div id="panel-rewards" class="tab-panel" style="display:none">
+            <!-- Label Print panel -->
+            <div id="panel-label-print" class="tab-panel" style="display:none">
                 <div class="table-container">
-                    <div class="table-header"><h2>Rewards</h2></div>
-                    <p style="padding:24px;color:#666;">Rewards program coming soon.</p>
+                    <div class="table-header">
+                        <h2>🏷️ Label Print</h2>
+                        <div class="header-actions">
+                            <label class="label-ctrl-row">
+                                Label Size:
+                                <select id="label-size-select" class="form-select" style="width:155px">
+                                    <option value="4x2">4" × 2" (Standard)</option>
+                                    <option value="2x1">2" × 1" (Small)</option>
+                                    <option value="4x3">4" × 3" (Large)</option>
+                                    <option value="4x6">4" × 6" (Shipping)</option>
+                                </select>
+                            </label>
+                            <label class="label-ctrl-row">
+                                Copies:
+                                <input type="number" id="label-copies-input" class="form-input" value="1" min="1" max="99" style="width:60px">
+                            </label>
+                            <button class="add-product-btn label-select-btn" onclick="toggleLabelPrintAll(true)">Select All</button>
+                            <button class="add-product-btn label-clear-btn" onclick="toggleLabelPrintAll(false)">Deselect All</button>
+                            <button class="add-product-btn label-download-btn" onclick="downloadSelectedZpl()">⬇ Download Selected ZPL</button>
+                        </div>
+                    </div>
+                    <div class="search-bar">
+                        <div class="search-input-wrap">
+                            <span class="search-icon">🔎</span>
+                            <input id="label-search" type="text" class="search-input" placeholder="Search by name or barcode..." oninput="renderLabelPrintList(this.value)">
+                            <button type="button" class="search-clear" onclick="document.getElementById('label-search').value='';renderLabelPrintList('')" aria-label="Clear search">✕</button>
+                        </div>
+                    </div>
+                    <div id="label-selected-count" class="label-selected-count">0 products selected</div>
+                    <table id="label-print-table">
+                        <thead>
+                            <tr>
+                                <th style="width:44px;text-align:center"><input type="checkbox" id="label-check-all" onchange="toggleLabelPrintAll(this.checked)"></th>
+                                <th>Name</th>
+                                <th>Internal Barcode</th>
+                                <th>Price</th>
+                                <th>Category</th>
+                                <th>Area</th>
+                                <th>Allergy notice</th>
+                            <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="label-print-tbody"></tbody>
+                    </table>
+                </div>
+            </div><!-- /panel-label-print -->
+
+            <!-- Awards 3D Studio -->
+            <div id="panel-awards" class="tab-panel" style="display:none">
+                <div class="awards-container">
+                    <div class="awards-header"><h2>Awards</h2></div>
+                    <div class="awards-layout">
+                        <div class="awards-controls">
+                            <div class="form-group">
+                                <label for="awards-name">Award name</label>
+                                <input type="text" id="awards-name" placeholder="e.g. Top Seller 2026">
+                            </div>
+                            <div class="form-group">
+                                <label>Upload logo</label>
+                                <label id="awards-dropzone" class="awards-dropzone" for="awards-file">
+                                    <input type="file" id="awards-file" accept="image/png,image/jpeg,image/jpg" hidden>
+                                    <p>Drag & drop a PNG/JPG here, or click to browse</p>
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label class="inline">
+                                    <input type="checkbox" id="awards-extrude" checked>
+                                    Enable 3D extrusion
+                                </label>
+                            </div>
+                            <div class="form-group">
+                                <label>Extrusion depth</label>
+                                <div class="awards-slider-row">
+                                    <input type="range" id="awards-depth" min="0" max="50" value="20">
+                                    <span id="awards-depth-value">20</span>
+                                </div>
+                            </div>
+                            <div class="awards-actions">
+                                <button id="awards-save" class="add-product-btn" disabled>Save to Library</button>
+                            </div>
+                            <p id="awards-status" class="awards-status"></p>
+                        </div>
+                        <div class="awards-preview">
+                            <div id="awards-canvas-container" class="awards-canvas-container"></div>
+                            <p class="awards-hint">Drag to rotate • Scroll to zoom</p>
+                        </div>
+                    </div>
+                    <div class="awards-library">
+                        <div class="table-header"><h3>Library</h3></div>
+                        <div id="awards-library-grid" class="awards-library-grid">
+                            <p class="awards-empty">No awards saved yet.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -379,9 +482,14 @@
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label">Allergy Summary (AI Generated)</label>
-                    <textarea class="form-input" id="product-allergy-summary" rows="3"
-                        placeholder="AI will populate this, or enter manually..."></textarea>
+                    <label class="form-label" for="product-ingredients">Ingredients &amp; package label</label>
+                    <textarea class="form-input" id="product-ingredients" rows="3" maxlength="10000" placeholder="Paste the ingredient list and any Contains / May contain statements. Automatic allergy checks start after 24 hours."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Allergy notice (automatic)</label>
+                    <textarea class="form-input" id="product-allergy-summary" rows="3" readonly
+                        placeholder="Added automatically after 24 hours when reliable source information is available."></textarea>
                 </div>
 
                 <!-- Images -->
@@ -424,8 +532,8 @@
                     <label class="form-label">Suggested Images</label>
                     <div style="display:flex; gap:12px; align-items:center; margin-bottom:8px;">
                         <button type="button" class="add-product-btn" onclick="suggestImagesForCurrentProduct()"
-                            title="Find suggested images based on name and category">Find Suggestions</button>
-                        <small style="color:#666;">Picks images with white background when possible.</small>
+                            title="Find suggested images based on the product name">Find Suggestions</button>
+                        <small style="color:#666;">Suggestions follow the product name.</small>
                     </div>
                     <div id="suggested-images"
                         style="display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap:10px;">
@@ -470,7 +578,37 @@
         </div>
     </div>
 
-    <script src="script.js?v=20250923-1"></script>
+    <!-- ZPL Label Preview Modal -->
+    <div class="label-preview-overlay" id="label-preview-overlay" onclick="if(event.target===this)closeLabelPreview()">
+        <div class="label-preview-modal">
+            <div class="label-preview-header">
+                <h3>🏷️ ZPL Label Preview</h3>
+                <button class="close-btn" onclick="closeLabelPreview()">&times;</button>
+            </div>
+            <div id="label-preview-product-info" style="margin-bottom:12px;font-size:14px;color:#555;"></div>
+            <div class="label-preview-tabs">
+                <button class="label-preview-tab active" id="tab-zpl-text" onclick="showLabelPreviewTab('text')">ZPL Code</button>
+                <button class="label-preview-tab" id="tab-zpl-visual" onclick="showLabelPreviewTab('visual')">Visual Preview</button>
+            </div>
+            <div id="label-preview-text-section">
+                <textarea id="label-zpl-text" class="label-zpl-textarea" readonly></textarea>
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                    <button class="add-product-btn" style="background:#475569" onclick="copyLabelZpl()">📋 Copy ZPL</button>
+                    <button class="add-product-btn label-download-btn" onclick="downloadCurrentLabelZpl()">⬇ Download ZPL</button>
+                </div>
+            </div>
+            <div id="label-preview-visual-section" style="display:none">
+                <div id="label-visual-loading" style="color:#888;font-size:13px;padding:12px 0;">Loading visual preview via Labelary…</div>
+                <img id="label-visual-img" style="max-width:100%;border:1px solid #e5e7eb;border-radius:6px;display:none;" alt="Label preview">
+                <div id="label-visual-error" style="color:#ef4444;font-size:13px;display:none;"></div>
+                <p style="font-size:12px;color:#9ca3af;margin-top:8px;">Preview powered by <a href="https://labelary.com" target="_blank" rel="noopener">Labelary</a></p>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js?v=20261027-admin-auth"></script>
+    <script src="ai-workspace.js?v=20261027-aws-key-settings"></script>
+    <script type="module" src="awards.js"></script>
 </body>
 
 </html>

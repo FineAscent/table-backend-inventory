@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src https://q5mv3u14v5.execute-api.us-east-1.amazonaws.com; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>AI key settings · AliBaba</title>
+  <link rel="stylesheet" href="ai-key-setup.css?v=20261027-aws">
+  <script src="ai-key-setup.js?v=20261027-aws" defer></script>
+</head>
+<body>
+  <main>
+    <a class="back" href="index.html">← Back to inventory</a>
+    <section class="key-card" aria-labelledby="setup-title">
+      <span class="eyebrow">AI CONNECTION</span>
+      <h1 id="setup-title">Add your OpenAI key</h1>
+      <p class="intro">Your key is saved in AWS Secrets Manager. Allergy notices continue to run automatically.</p>
+      <dl><div><dt>Model</dt><dd>GPT-6 Luna</dd></div><div><dt>Connection</dt><dd id="key-connection">Checking…</dd></div></dl>
+      <form id="key-form" autocomplete="off">
+        <label for="ai-secret-key">OpenAI API key</label>
+        <input id="ai-secret-key" name="ai-secret-key" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" maxlength="503" placeholder="sk-…" required disabled aria-describedby="key-help">
+        <p class="help" id="key-help">The saved key cannot be displayed or retrieved here. Enter a new key to replace it.</p>
+        <button id="key-submit" type="submit" disabled>Save key securely</button>
+        <button id="key-clear" type="button">Clear field</button>
+      </form>
+      <p id="key-status" role="status" aria-live="polite"></p>
+      <p class="privacy">This page uses no third-party scripts. The key is cleared after submission and is never saved in browser storage.</p>
+    </section>
+  </main>
+</body>
+</html>
